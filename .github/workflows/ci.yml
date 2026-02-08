@@ -1,0 +1,265 @@
+# =============================================================================
+# ProcGenie S2P Platform - Continuous Integration
+# =============================================================================
+# Triggers: push to main, pull requests to main
+# Jobs: lint, test (web + api), build (web + api)
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+  NPM_CACHE_KEY: npm-v1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter (web)
+        run: npm run lint --workspace=apps/web --if-present
+
+      - name: Run linter (api)
+        run: npm run lint --workspace=apps/api --if-present
+
+      - name: Type check (shared-types)
+        run: npm run typecheck --workspace=packages/shared-types --if-present
+
+      - name: Type check (web)
+        run: npm run type-check --workspace=apps/web --if-present
+
+      - name: Check formatting
+        run: npx prettier --check "**/*.{ts,tsx,js,jsx,json}" --ignore-path .gitignore
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # Test - Web
+  # ---------------------------------------------------------------------------
+  test-web:
+    name: Test (Web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run web tests
+        run: npm run test --workspace=apps/web --if-present
+        env:
+          CI: true
+
+      - name: Upload web test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-test-results
+          path: |
+            apps/web/coverage/
+            apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Test - API
+  # ---------------------------------------------------------------------------
+  test-api:
+    name: Test (API)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: procgenie
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: procgenie_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U procgenie -d procgenie_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run API tests
+        run: npm run test --workspace=apps/api --if-present
+        env:
+          CI: true
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: procgenie
+          DB_PASSWORD: test_password
+          DB_DATABASE: procgenie_test
+          DB_SSL: "false"
+          DB_SYNCHRONIZE: "true"
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          JWT_SECRET: ci-test-jwt-secret
+          JWT_REFRESH_SECRET: ci-test-jwt-refresh-secret
+
+      - name: Run API e2e tests
+        run: npm run test:e2e --workspace=apps/api --if-present
+        env:
+          CI: true
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: procgenie
+          DB_PASSWORD: test_password
+          DB_DATABASE: procgenie_test
+          DB_SSL: "false"
+          DB_SYNCHRONIZE: "true"
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          JWT_SECRET: ci-test-jwt-secret
+          JWT_REFRESH_SECRET: ci-test-jwt-refresh-secret
+        continue-on-error: true
+
+      - name: Upload API test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-test-results
+          path: |
+            apps/api/coverage/
+            apps/api/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Build - Web
+  # ---------------------------------------------------------------------------
+  build-web:
+    name: Build (Web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test-web]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web application
+        run: npm run build --workspace=apps/web
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          NEXT_PUBLIC_API_URL: https://api.procgenie.com/api/v1
+          NEXT_PUBLIC_APP_NAME: ProcGenie
+
+      - name: Build web Docker image
+        run: |
+          docker build \
+            -t procgenie-web:ci-${{ github.sha }} \
+            -f apps/web/Dockerfile \
+            .
+
+      - name: Verify Docker image
+        run: docker image inspect procgenie-web:ci-${{ github.sha }}
+
+  # ---------------------------------------------------------------------------
+  # Build - API
+  # ---------------------------------------------------------------------------
+  build-api:
+    name: Build (API)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test-api]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build API application
+        run: npm run build --workspace=apps/api
+
+      - name: Build API Docker image
+        run: |
+          docker build \
+            -t procgenie-api:ci-${{ github.sha }} \
+            -f apps/api/Dockerfile \
+            .
+
+      - name: Verify Docker image
+        run: docker image inspect procgenie-api:ci-${{ github.sha }}

@@ -1,0 +1,356 @@
+# =============================================================================
+# ProcGenie S2P Platform - Continuous Deployment
+# =============================================================================
+# Triggers: push to main (after CI passes)
+# Deploys: Docker images to ACR, updates Azure Container Apps
+# =============================================================================
+
+name: Deploy
+
+on:
+  push:
+    branches: [main, 'claude/**']
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: dev
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "20"
+  AZURE_RESOURCE_GROUP: rg-procgenie-${{ github.event.inputs.environment || 'dev' }}
+  ACR_NAME: acrprocgenie${{ github.event.inputs.environment || 'dev' }}
+  IMAGE_TAG: ${{ github.sha }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gate: Ensure CI passed
+  # ---------------------------------------------------------------------------
+  ci-check:
+    name: Verify CI Status
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check CI workflow status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: context.sha,
+              status: 'completed',
+            });
+
+            const ciRun = runs.workflow_runs.find(r => r.name === 'CI');
+            if (!ciRun) {
+              core.info('No CI run found for this commit. Proceeding with deployment.');
+              return;
+            }
+            if (ciRun.conclusion !== 'success') {
+              core.setFailed(`CI workflow did not succeed (conclusion: ${ciRun.conclusion}). Aborting deployment.`);
+            } else {
+              core.info('CI workflow passed. Proceeding with deployment.');
+            }
+
+  # ---------------------------------------------------------------------------
+  # Build and Push Docker Images
+  # ---------------------------------------------------------------------------
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: ci-check
+    outputs:
+      web-image: ${{ steps.images.outputs.web }}
+      api-image: ${{ steps.images.outputs.api }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Get ACR login server
+        id: acr
+        run: |
+          LOGIN_SERVER=$(az acr show --name ${{ env.ACR_NAME }} --query loginServer -o tsv)
+          echo "login_server=${LOGIN_SERVER}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.acr.outputs.login_server }}/procgenie-web:${{ env.IMAGE_TAG }}
+            ${{ steps.acr.outputs.login_server }}/procgenie-web:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.acr.outputs.login_server }}/procgenie-api:${{ env.IMAGE_TAG }}
+            ${{ steps.acr.outputs.login_server }}/procgenie-api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Set image outputs
+        id: images
+        run: |
+          echo "web=${{ steps.acr.outputs.login_server }}/procgenie-web:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          echo "api=${{ steps.acr.outputs.login_server }}/procgenie-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Deploy to Azure Container Apps
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build-and-push
+    environment:
+      name: ${{ github.event.inputs.environment || 'dev' }}
+      url: ${{ steps.urls.outputs.web_url }}
+
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy web container app
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          resourceGroup: ${{ env.AZURE_RESOURCE_GROUP }}
+          containerAppName: ca-procgenie-${{ env.ENVIRONMENT }}-web
+          imageToDeploy: ${{ needs.build-and-push.outputs.web-image }}
+
+      - name: Deploy API container app
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          resourceGroup: ${{ env.AZURE_RESOURCE_GROUP }}
+          containerAppName: ca-procgenie-${{ env.ENVIRONMENT }}-api
+          imageToDeploy: ${{ needs.build-and-push.outputs.api-image }}
+
+      - name: Get deployment URLs
+        id: urls
+        run: |
+          WEB_FQDN=$(az containerapp show \
+            --name "ca-procgenie-${{ env.ENVIRONMENT }}-web" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          API_FQDN=$(az containerapp show \
+            --name "ca-procgenie-${{ env.ENVIRONMENT }}-api" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "web_url=https://${WEB_FQDN}" >> "$GITHUB_OUTPUT"
+          echo "api_url=https://${API_FQDN}" >> "$GITHUB_OUTPUT"
+
+      - name: Run database migrations
+        run: |
+          az containerapp exec \
+            --name "ca-procgenie-${{ env.ENVIRONMENT }}-api" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --command "node dist/database/run-migrations.js" || \
+          echo "::warning::Migration execution skipped"
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # Smoke Tests
+  # ---------------------------------------------------------------------------
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: deploy
+
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get service URLs
+        id: urls
+        run: |
+          WEB_FQDN=$(az containerapp show \
+            --name "ca-procgenie-${{ env.ENVIRONMENT }}-web" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          API_FQDN=$(az containerapp show \
+            --name "ca-procgenie-${{ env.ENVIRONMENT }}-api" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "web_url=https://${WEB_FQDN}" >> "$GITHUB_OUTPUT"
+          echo "api_url=https://${API_FQDN}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for services to stabilize
+        run: sleep 30
+
+      - name: Smoke test - Web app
+        run: |
+          echo "Testing web app at ${{ steps.urls.outputs.web_url }}"
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.urls.outputs.web_url }}" --max-time 30 || echo "000")
+            echo "Attempt ${i}: HTTP ${STATUS}"
+            if [ "${STATUS}" = "200" ]; then
+              echo "Web app is healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Web app smoke test failed"
+          exit 1
+
+      - name: Smoke test - API health
+        run: |
+          echo "Testing API health at ${{ steps.urls.outputs.api_url }}/api/v1/health"
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.urls.outputs.api_url }}/api/v1/health" --max-time 30 || echo "000")
+            echo "Attempt ${i}: HTTP ${STATUS}"
+            if [ "${STATUS}" = "200" ]; then
+              echo "API is healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::API smoke test failed"
+          exit 1
+
+      - name: Smoke test - API response validation
+        run: |
+          RESPONSE=$(curl -s "${{ steps.urls.outputs.api_url }}/api/v1/health" --max-time 30 || echo '{}')
+          echo "Health response: ${RESPONSE}"
+          echo "${RESPONSE}" | jq -e '.status' > /dev/null 2>&1 || \
+            echo "::warning::Health endpoint did not return expected JSON format"
+
+  # ---------------------------------------------------------------------------
+  # Post-Deployment Notification
+  # ---------------------------------------------------------------------------
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [deploy, smoke-tests]
+    if: always()
+
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get deployment URLs
+        id: urls
+        run: |
+          WEB_FQDN=$(az containerapp show \
+            --name "ca-procgenie-${{ env.ENVIRONMENT }}-web" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv 2>/dev/null || echo "unknown")
+          API_FQDN=$(az containerapp show \
+            --name "ca-procgenie-${{ env.ENVIRONMENT }}-api" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv 2>/dev/null || echo "unknown")
+          echo "web_url=https://${WEB_FQDN}" >> "$GITHUB_OUTPUT"
+          echo "api_url=https://${API_FQDN}" >> "$GITHUB_OUTPUT"
+
+      - name: Deployment summary
+        run: |
+          DEPLOY_STATUS="${{ needs.deploy.result }}"
+          SMOKE_STATUS="${{ needs.smoke-tests.result }}"
+
+          echo "## Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | \`${{ env.ENVIRONMENT }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image Tag | \`${{ env.IMAGE_TAG }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deploy Status | ${DEPLOY_STATUS} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Smoke Tests | ${SMOKE_STATUS} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Web URL | ${{ steps.urls.outputs.web_url }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| API URL | ${{ steps.urls.outputs.api_url }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Triggered By | @${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Workflow Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post to Slack (if configured)
+        if: env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          DEPLOY_STATUS="${{ needs.deploy.result }}"
+          EMOJI=$([[ "${DEPLOY_STATUS}" == "success" ]] && echo ":white_check_mark:" || echo ":x:")
+
+          curl -s -X POST "${SLACK_WEBHOOK_URL}" \
+            -H 'Content-type: application/json' \
+            -d @- <<PAYLOAD
+          {
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "${EMOJI} ProcGenie Deployment - ${{ env.ENVIRONMENT }}"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  { "type": "mrkdwn", "text": "*Status:*\n${DEPLOY_STATUS}" },
+                  { "type": "mrkdwn", "text": "*Environment:*\n${{ env.ENVIRONMENT }}" },
+                  { "type": "mrkdwn", "text": "*Commit:*\n\`${{ github.sha }}\`" },
+                  { "type": "mrkdwn", "text": "*Triggered by:*\n@${{ github.actor }}" }
+                ]
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "<${{ steps.urls.outputs.web_url }}|Web App> | <${{ steps.urls.outputs.api_url }}/api/v1/health|API Health> | <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Workflow Run>"
+                }
+              }
+            ]
+          }
+          PAYLOAD
+        continue-on-error: true

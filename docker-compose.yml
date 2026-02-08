@@ -1,0 +1,207 @@
+# =============================================================================
+# ProcGenie S2P Platform - Docker Compose (Local Development)
+# =============================================================================
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose down            # Stop all services
+#   docker-compose logs -f web     # Follow logs for web service
+#   docker-compose ps              # List running services
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Web - Next.js Frontend
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: builder
+    container_name: procgenie-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:4000/api/v1
+      - NEXT_PUBLIC_WS_URL=ws://localhost:4000
+      - NEXT_PUBLIC_APP_NAME=ProcGenie
+      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=local-dev-secret-change-in-production
+    volumes:
+      - ./apps/web/src:/app/apps/web/src:ro
+      - ./apps/web/public:/app/apps/web/public:ro
+      - ./packages/shared-types/src:/app/packages/shared-types/src:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - procgenie-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    command: ["npx", "next", "dev"]
+    working_dir: /app/apps/web
+
+  # ---------------------------------------------------------------------------
+  # API - NestJS Backend
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: builder
+    container_name: procgenie-api
+    ports:
+      - "4000:4000"
+      - "9229:9229"  # Node.js debug port
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - API_PREFIX=api/v1
+      - APP_NAME=ProcGenie
+      - APP_URL=http://localhost:4000
+      - CORS_ORIGINS=http://localhost:3000
+      # Database
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=procgenie
+      - DB_PASSWORD=procgenie_secret
+      - DB_DATABASE=procgenie_dev
+      - DB_SSL=false
+      - DB_SYNCHRONIZE=true
+      - DB_LOGGING=true
+      - DB_MAX_CONNECTIONS=20
+      # Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - REDIS_TTL=3600
+      # JWT
+      - JWT_SECRET=local-dev-jwt-secret-change-in-production
+      - JWT_EXPIRES_IN=1h
+      - JWT_REFRESH_SECRET=local-dev-refresh-secret-change-in-production
+      - JWT_REFRESH_EXPIRES_IN=7d
+      # AI
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-ant-placeholder}
+      - ANTHROPIC_MODEL=claude-sonnet-4-20250514
+      - ANTHROPIC_MAX_TOKENS=4096
+      # Bull Queue
+      - BULL_QUEUE_PREFIX=procgenie
+      - BULL_QUEUE_DEFAULT_ATTEMPTS=3
+      - BULL_QUEUE_DEFAULT_BACKOFF=5000
+      # Logging
+      - LOG_LEVEL=debug
+      - LOG_FORMAT=json
+      # Rate Limiting
+      - THROTTLE_TTL=60
+      - THROTTLE_LIMIT=100
+      # WebSocket
+      - WS_PORT=4000
+      - WS_NAMESPACE=/notifications
+      # Feature Flags
+      - FEATURE_AI_ANALYSIS=true
+      - FEATURE_ESG_SCORING=true
+      - FEATURE_PREDICTIVE_ANALYTICS=true
+      - FEATURE_AUTO_APPROVAL=false
+      # Multi-tenancy
+      - DEFAULT_TENANT_ID=default
+    volumes:
+      - ./apps/api/src:/app/apps/api/src:ro
+      - ./packages/shared-types/src:/app/packages/shared-types/src:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - procgenie-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    command: ["npx", "nest", "start", "--watch"]
+    working_dir: /app/apps/api
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: procgenie-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=procgenie
+      - POSTGRES_PASSWORD=procgenie_secret
+      - POSTGRES_DB=procgenie_dev
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=en_US.utf8 --lc-ctype=en_US.utf8
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - procgenie-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U procgenie -d procgenie_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    shm_size: 256mb
+
+  # ---------------------------------------------------------------------------
+  # Redis Cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: procgenie-redis
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --save 60 1000
+      --loglevel notice
+    volumes:
+      - redis-data:/data
+    networks:
+      - procgenie-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  procgenie-network:
+    driver: bridge
+    name: procgenie-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres-data:
+    driver: local
+    name: procgenie-postgres-data
+  redis-data:
+    driver: local
+    name: procgenie-redis-data

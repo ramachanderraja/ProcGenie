@@ -1,0 +1,150 @@
+# =============================================================================
+# ProcGenie S2P Platform - Docker Compose Production Overrides
+# =============================================================================
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Web - Production configuration
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      target: runner
+    container_name: procgenie-web-prod
+    ports: []  # No direct port exposure in production; use reverse proxy
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+    volumes: []  # No source mounts in production
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      replicas: 2
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "procgenie-web"
+    command: ["node", "apps/web/server.js"]
+    working_dir: /app
+
+  # ---------------------------------------------------------------------------
+  # API - Production configuration
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      target: runner
+    container_name: procgenie-api-prod
+    ports: []  # No direct port exposure in production
+    environment:
+      - NODE_ENV=production
+      - DB_SYNCHRONIZE=false
+      - DB_LOGGING=false
+      - DB_SSL=true
+      - LOG_LEVEL=warn
+      - LOG_FORMAT=json
+    volumes: []  # No source mounts in production
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      replicas: 2
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "procgenie-api"
+    command: ["dumb-init", "--", "node", "dist/main.js"]
+    working_dir: /app
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL - Production configuration
+  # ---------------------------------------------------------------------------
+  postgres:
+    ports: []  # No direct port exposure in production
+    environment:
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "procgenie-postgres"
+    command: >
+      postgres
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c maintenance_work_mem=128MB
+      -c work_mem=8MB
+      -c max_connections=200
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c wal_buffers=16MB
+      -c max_wal_size=2GB
+      -c min_wal_size=512MB
+      -c checkpoint_completion_target=0.9
+      -c log_min_duration_statement=1000
+      -c log_checkpoints=on
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_lock_waits=on
+      -c log_statement=ddl
+      -c ssl=off
+
+  # ---------------------------------------------------------------------------
+  # Redis - Production configuration
+  # ---------------------------------------------------------------------------
+  redis:
+    ports: []  # No direct port exposure in production
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --loglevel warning
+      --tcp-keepalive 300
+      --timeout 300
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "procgenie-redis"

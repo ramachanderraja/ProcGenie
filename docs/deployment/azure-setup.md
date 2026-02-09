@@ -2,6 +2,19 @@
 
 > Step-by-step guide for deploying ProcGenie to Azure using Bicep templates, Container Apps, and managed services.
 
+## GEP-Specific Policy Requirements
+
+> **IMPORTANT**: GEP Azure subscription has strict policies. These must be followed or deployments will fail.
+
+| Policy | Requirement |
+|--------|------------|
+| **Region** | `eastus` is restricted. Use **`westus2`** |
+| **RG Tags** | Must include `documentTeam` (e.g. `Architecture`) and `projectName` (e.g. `IT`) |
+| **Key Vault** | `publicNetworkAccess` must be `Disabled`, `networkAcls.defaultAction` must be `Deny` |
+| **ACR SKU** | Only `Basic` and `Standard` allowed. Basic does NOT support `retentionPolicy` |
+| **Role Assignments** | User has `Contributor` only (not Owner). Cannot create RBAC role assignments. Use ACR admin credentials + Key Vault access policies instead |
+| **AI Provider** | Azure OpenAI (resource: `sourceai-dev-oai-k8nq50` in `sourceai-dev-rg`), deployment: `gpt-4o` |
+
 ## 1. Prerequisites
 
 ### Required Tools
@@ -13,12 +26,13 @@
 | Docker | 24+ | Container image builds |
 | Node.js | 20+ | Build toolchain |
 | Git | 2.40+ | Source control |
+| jq | 1.6+ | JSON processing |
 
 ### Required Azure Permissions
 
-- **Contributor** role on the target subscription (or a dedicated resource group)
-- **User Access Administrator** for role assignments (Key Vault access policies, managed identities)
+- **Contributor** role on the target subscription or resource group
 - **Microsoft.App** resource provider registered on the subscription
+- Note: **Owner** role is NOT available under GEP policy. Use ACR admin credentials and KV access policies instead of RBAC
 
 ### Azure Services Used
 
@@ -26,21 +40,19 @@
 |---|---|---|
 | Azure Container Apps | Consumption | Application hosting (web + API) |
 | Azure Container Registry | Basic | Private Docker image registry |
-| Azure Database for PostgreSQL | Flexible Server, Burstable B2ms | Primary database |
-| Azure Cache for Redis | Basic C1 | Caching, session store, Bull queues |
+| Azure Database for PostgreSQL | Flexible Server, Burstable B1ms | Primary database |
+| Azure Cache for Redis | Basic C0 | Caching, session store, Bull queues |
 | Azure Front Door | Standard | CDN, WAF, TLS termination, global routing |
 | Azure Key Vault | Standard | Secrets and certificate management |
-| Azure Blob Storage | Standard LRS | Document and file storage |
-| Azure Application Insights | Pay-as-you-go | APM, logging, distributed tracing |
 | Azure Log Analytics Workspace | Pay-as-you-go | Centralized log aggregation |
+| Managed Identity | User-assigned | Service authentication |
 
 ### Pre-Deployment Checklist
 
-- [ ] Azure subscription with sufficient quota
-- [ ] Custom domain DNS access (for `api.procgenie.io` and `app.procgenie.io`)
-- [ ] Anthropic API key for AI features
-- [ ] SSL certificate (or use Azure-managed certificate)
-- [ ] SMTP credentials for email notifications
+- [ ] Azure subscription with sufficient quota (`GEPRnD` subscription)
+- [ ] Azure OpenAI access (resource `sourceai-dev-oai-k8nq50` in `sourceai-dev-rg`)
+- [ ] Docker Desktop running locally
+- [ ] Git Bash or WSL (on Windows, use `MSYS_NO_PATHCONV=1` for Azure CLI path args)
 
 ## 2. Bicep Template Walkthrough
 
@@ -95,7 +107,9 @@ front-door.bicep ← container-apps.bicep (needs app FQDN)
 | `dbAdminPassword` | secureString | -- | PostgreSQL admin password |
 | `redisPassword` | secureString | -- | Redis auth password |
 | `jwtSecret` | secureString | -- | JWT signing key |
-| `anthropicApiKey` | secureString | -- | Anthropic Claude API key |
+| `azureOpenAiApiKey` | secureString | -- | Azure OpenAI API key |
+| `azureOpenAiEndpoint` | string | -- | Azure OpenAI endpoint URL |
+| `azureOpenAiDeploymentName` | string | `gpt-4o` | Azure OpenAI model deployment name |
 | `customDomainApi` | string | `api.procgenie.io` | Custom domain for API |
 | `customDomainWeb` | string | `app.procgenie.io` | Custom domain for frontend |
 | `alertEmailAddress` | string | -- | Email for monitoring alerts |
@@ -156,7 +170,9 @@ az deployment group create \
     dbAdminPassword="<strong-password>" \
     redisPassword="<strong-password>" \
     jwtSecret="<random-256-bit-key>" \
-    anthropicApiKey="<your-anthropic-key>" \
+    azureOpenAiApiKey="<your-azure-openai-key>" \
+    azureOpenAiEndpoint="https://westus.api.cognitive.microsoft.com/" \
+    azureOpenAiDeploymentName="gpt-4o" \
     alertEmailAddress="ops@yourcompany.com"
 ```
 

@@ -20,6 +20,7 @@ concurrency:
 env:
   NODE_VERSION: "20"
   NPM_CACHE_KEY: npm-v1
+  ESLINT_USE_FLAT_CONFIG: "false"
 
 jobs:
   # ---------------------------------------------------------------------------

@@ -252,9 +252,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build API application
-        run: npm run build --workspace=apps/api
-
       - name: Build API Docker image
         run: |
           docker build \

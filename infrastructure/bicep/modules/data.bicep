@@ -97,15 +97,8 @@ resource pgExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@
   }
 }
 
-// PostgreSQL firewall rule - allow Azure services
-resource pgFirewallAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-12-01-preview' = {
-  parent: postgresServer
-  name: 'AllowAzureServices'
-  properties: {
-    startIpAddress: '0.0.0.0'
-    endIpAddress: '0.0.0.0'
-  }
-}
+// Note: Firewall rules are not supported when using VNet integration (delegated subnet).
+// Network access is controlled by the VNet and private DNS zone above.
 
 // =============================================================================
 // Azure Cache for Redis

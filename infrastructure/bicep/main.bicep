@@ -36,14 +36,25 @@ param jwtSecret string
 @secure()
 param jwtRefreshSecret string
 
-@description('Anthropic API key for Claude AI integration')
+@description('Azure OpenAI API key')
 @secure()
-param anthropicApiKey string
+param azureOpenAiApiKey string
+
+@description('Azure OpenAI endpoint URL')
+param azureOpenAiEndpoint string = 'https://westus.api.cognitive.microsoft.com/'
+
+@description('Azure OpenAI deployment name')
+param azureOpenAiDeploymentName string = 'gpt-4o'
 
 @description('Tags applied to all resources')
 param tags object = {
   project: 'procgenie'
   managedBy: 'bicep'
+  documentTeam: 'Architecture'
+  projectName: 'IT'
+  Owner: 'RRamachander'
+  Department: 'R&D'
+  CostCenter: 'GEPRnD'
 }
 
 // =============================================================================
@@ -135,6 +146,7 @@ module containerApps 'modules/containers.bicep' = {
     logAnalyticsId: coreInfra.outputs.logAnalyticsId
     appsSubnetId: coreInfra.outputs.appsSubnetId
     acrLoginServer: coreInfra.outputs.acrLoginServer
+    acrName: coreInfra.outputs.acrName
     identityId: coreInfra.outputs.identityId
     identityClientId: coreInfra.outputs.identityClientId
     postgresHost: dataServices.outputs.postgresHost
@@ -146,7 +158,9 @@ module containerApps 'modules/containers.bicep' = {
     redisAccessKey: dataServices.outputs.redisAccessKey
     jwtSecret: jwtSecret
     jwtRefreshSecret: jwtRefreshSecret
-    anthropicApiKey: anthropicApiKey
+    azureOpenAiApiKey: azureOpenAiApiKey
+    azureOpenAiEndpoint: azureOpenAiEndpoint
+    azureOpenAiDeploymentName: azureOpenAiDeploymentName
     environment: environment
   }
   dependsOn: [coreInfra, dataServices]
@@ -183,7 +197,7 @@ module secrets 'modules/secrets.bicep' = {
       'redis-connection-string': dataServices.outputs.redisConnectionString
       'jwt-secret': jwtSecret
       'jwt-refresh-secret': jwtRefreshSecret
-      'anthropic-api-key': anthropicApiKey
+      'azure-openai-api-key': azureOpenAiApiKey
     }
     identityPrincipalId: coreInfra.outputs.identityPrincipalId
   }

@@ -162,9 +162,9 @@ export class AnalyticsService {
     }
 
     try {
-      const apiKey = this.configService.get<string>('ai.anthropicApiKey');
+      const apiKey = this.configService.get<string>('ai.azureOpenAiApiKey');
 
-      if (apiKey && apiKey !== 'sk-ant-your-api-key-here') {
+      if (apiKey && apiKey.length > 0) {
         return await this.performAiQuery(tenantId, query);
       }
 
@@ -201,7 +201,7 @@ export class AnalyticsService {
     tenantId: string,
     query: string,
   ): Promise<NLQueryResult> {
-    // Placeholder for actual Anthropic SDK call
+    // Placeholder for actual Azure OpenAI SDK call
     return this.mockNlQuery(query);
   }
 

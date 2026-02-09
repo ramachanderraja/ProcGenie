@@ -43,9 +43,11 @@ export default () => ({
     },
   },
   ai: {
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-    anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
-    anthropicMaxTokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS, 10) || 4096,
+    azureOpenAiApiKey: process.env.AZURE_OPENAI_API_KEY,
+    azureOpenAiEndpoint: process.env.AZURE_OPENAI_ENDPOINT,
+    azureOpenAiDeploymentName: process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o',
+    azureOpenAiApiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview',
+    maxTokens: parseInt(process.env.AZURE_OPENAI_MAX_TOKENS, 10) || 4096,
   },
   bull: {
     prefix: process.env.BULL_QUEUE_PREFIX || 'procgenie',

@@ -213,10 +213,10 @@ export class IntakeService {
     this.logger.log('Running AI intake analysis');
 
     try {
-      // In production, this would call the Anthropic API
-      const apiKey = this.configService.get<string>('ai.anthropicApiKey');
+      // In production, this calls Azure OpenAI
+      const apiKey = this.configService.get<string>('ai.azureOpenAiApiKey');
 
-      if (apiKey && apiKey !== 'sk-ant-your-api-key-here') {
+      if (apiKey && apiKey.length > 0) {
         return await this.performAiAnalysis(dto);
       }
 
@@ -276,9 +276,7 @@ export class IntakeService {
   private async performAiAnalysis(
     dto: AnalyzeIntakeDto,
   ): Promise<IntakeAnalysisResponseDto> {
-    // Placeholder for actual Anthropic SDK call
-    // const anthropic = new Anthropic({ apiKey: this.configService.get('ai.anthropicApiKey') });
-    // const response = await anthropic.messages.create({...});
+    // Placeholder for actual Azure OpenAI SDK call
     return this.mockAnalysis(dto);
   }
 

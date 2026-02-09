@@ -50,7 +50,7 @@ export class Agent extends BaseEntity {
   @Column({ type: 'enum', enum: AgentStatus, default: AgentStatus.IDLE })
   status: AgentStatus;
 
-  @ApiProperty({ example: 'claude-sonnet-4-20250514' })
+  @ApiProperty({ example: 'gpt-4o' })
   @Column({ name: 'model_id', type: 'varchar', length: 100, nullable: true })
   modelId?: string;
 

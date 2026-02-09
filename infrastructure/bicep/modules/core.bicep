@@ -116,28 +116,11 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = {
   properties: {
     adminUserEnabled: true
     publicNetworkAccess: 'Enabled'
-    policies: {
-      retentionPolicy: {
-        status: 'enabled'
-        days: 30
-      }
-    }
-  }
-}
-
-// Grant the managed identity AcrPull role on the container registry
-resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, managedIdentity.id, 'acrpull')
-  scope: acr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d') // AcrPull
-    principalId: managedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
   }
 }
 
 // =============================================================================
-// Azure Key Vault
+// Azure Key Vault (access policies — no Owner role required)
 // =============================================================================
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
@@ -150,15 +133,23 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
       family: 'A'
       name: 'standard'
     }
-    enableRbacAuthorization: true
+    enableRbacAuthorization: false
     enableSoftDelete: true
-    softDeleteRetentionInDays: 7
-    enablePurgeProtection: false  // Set to true in production
-    publicNetworkAccess: 'Enabled'
+    softDeleteRetentionInDays: 90
+    publicNetworkAccess: 'Disabled'
     networkAcls: {
-      defaultAction: 'Allow'
+      defaultAction: 'Deny'
       bypass: 'AzureServices'
     }
+    accessPolicies: [
+      {
+        tenantId: subscription().tenantId
+        objectId: managedIdentity.properties.principalId
+        permissions: {
+          secrets: ['get', 'list']
+        }
+      }
+    ]
   }
 }
 

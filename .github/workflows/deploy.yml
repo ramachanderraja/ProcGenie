@@ -31,11 +31,11 @@ env:
   NODE_VERSION: "20"
   AZURE_RESOURCE_GROUP: rg-procgenie-${{ github.event.inputs.environment || 'dev' }}
   ACR_NAME: acrprocgenie${{ github.event.inputs.environment || 'dev' }}
+  ACR_LOGIN_SERVER: acrprocgenie${{ github.event.inputs.environment || 'dev' }}.azurecr.io
   IMAGE_TAG: ${{ github.sha }}
   ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -89,21 +89,17 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Login to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Get ACR login server
-        id: acr
-        run: |
-          LOGIN_SERVER=$(az acr show --name ${{ env.ACR_NAME }} --query loginServer -o tsv)
-          echo "login_server=${LOGIN_SERVER}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push web image
         uses: docker/build-push-action@v6
@@ -112,8 +108,8 @@ jobs:
           file: apps/web/Dockerfile
           push: true
           tags: |
-            ${{ steps.acr.outputs.login_server }}/procgenie-web:${{ env.IMAGE_TAG }}
-            ${{ steps.acr.outputs.login_server }}/procgenie-web:latest
+            ${{ env.ACR_LOGIN_SERVER }}/procgenie-web:${{ env.IMAGE_TAG }}
+            ${{ env.ACR_LOGIN_SERVER }}/procgenie-web:latest
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
@@ -124,16 +120,16 @@ jobs:
           file: apps/api/Dockerfile
           push: true
           tags: |
-            ${{ steps.acr.outputs.login_server }}/procgenie-api:${{ env.IMAGE_TAG }}
-            ${{ steps.acr.outputs.login_server }}/procgenie-api:latest
+            ${{ env.ACR_LOGIN_SERVER }}/procgenie-api:${{ env.IMAGE_TAG }}
+            ${{ env.ACR_LOGIN_SERVER }}/procgenie-api:latest
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
 
       - name: Set image outputs
         id: images
         run: |
-          echo "web=${{ steps.acr.outputs.login_server }}/procgenie-web:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
-          echo "api=${{ steps.acr.outputs.login_server }}/procgenie-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          echo "web=${{ env.ACR_LOGIN_SERVER }}/procgenie-web:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          echo "api=${{ env.ACR_LOGIN_SERVER }}/procgenie-api:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
   # Deploy to Azure Container Apps
@@ -151,23 +147,21 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy web container app
-        uses: azure/container-apps-deploy-action@v2
-        with:
-          resourceGroup: ${{ env.AZURE_RESOURCE_GROUP }}
-          containerAppName: ca-procgenie-${{ env.ENVIRONMENT }}-web
-          imageToDeploy: ${{ needs.build-and-push.outputs.web-image }}
+        run: |
+          az containerapp update \
+            --name "ca-procgenie-${{ env.ENVIRONMENT }}-web" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --image "${{ needs.build-and-push.outputs.web-image }}"
 
       - name: Deploy API container app
-        uses: azure/container-apps-deploy-action@v2
-        with:
-          resourceGroup: ${{ env.AZURE_RESOURCE_GROUP }}
-          containerAppName: ca-procgenie-${{ env.ENVIRONMENT }}-api
-          imageToDeploy: ${{ needs.build-and-push.outputs.api-image }}
+        run: |
+          az containerapp update \
+            --name "ca-procgenie-${{ env.ENVIRONMENT }}-api" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --image "${{ needs.build-and-push.outputs.api-image }}"
 
       - name: Get deployment URLs
         id: urls
@@ -205,9 +199,7 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Get service URLs
         id: urls
@@ -274,27 +266,6 @@ jobs:
     if: always()
 
     steps:
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Get deployment URLs
-        id: urls
-        run: |
-          WEB_FQDN=$(az containerapp show \
-            --name "ca-procgenie-${{ env.ENVIRONMENT }}-web" \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --query "properties.configuration.ingress.fqdn" -o tsv 2>/dev/null || echo "unknown")
-          API_FQDN=$(az containerapp show \
-            --name "ca-procgenie-${{ env.ENVIRONMENT }}-api" \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --query "properties.configuration.ingress.fqdn" -o tsv 2>/dev/null || echo "unknown")
-          echo "web_url=https://${WEB_FQDN}" >> "$GITHUB_OUTPUT"
-          echo "api_url=https://${API_FQDN}" >> "$GITHUB_OUTPUT"
-
       - name: Deployment summary
         run: |
           DEPLOY_STATUS="${{ needs.deploy.result }}"

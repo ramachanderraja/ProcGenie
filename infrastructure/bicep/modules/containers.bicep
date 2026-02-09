@@ -11,6 +11,7 @@ param apiAppName string
 param logAnalyticsId string
 param appsSubnetId string
 param acrLoginServer string
+param acrName string
 param identityId string
 param identityClientId string
 
@@ -31,8 +32,18 @@ param jwtSecret string
 @secure()
 param jwtRefreshSecret string
 @secure()
-param anthropicApiKey string
+param azureOpenAiApiKey string
+param azureOpenAiEndpoint string
+param azureOpenAiDeploymentName string
 param environment string
+
+// =============================================================================
+// Reference existing ACR for admin credentials
+// =============================================================================
+
+resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
+  name: acrName
+}
 
 // =============================================================================
 // Container Apps Environment
@@ -98,13 +109,18 @@ resource webApp 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [
         {
           server: acrLoginServer
-          identity: identityId
+          username: acr.listCredentials().username
+          passwordSecretRef: 'acr-password'
         }
       ]
       secrets: [
         {
           name: 'nextauth-secret'
           value: jwtSecret
+        }
+        {
+          name: 'acr-password'
+          value: acr.listCredentials().passwords[0].value
         }
       ]
     }
@@ -218,15 +234,17 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [
         {
           server: acrLoginServer
-          identity: identityId
+          username: acr.listCredentials().username
+          passwordSecretRef: 'acr-password'
         }
       ]
       secrets: [
+        { name: 'acr-password', value: acr.listCredentials().passwords[0].value }
         { name: 'db-password', value: postgresAdminPassword }
         { name: 'redis-password', value: redisAccessKey }
         { name: 'jwt-secret', value: jwtSecret }
         { name: 'jwt-refresh-secret', value: jwtRefreshSecret }
-        { name: 'anthropic-api-key', value: anthropicApiKey }
+        { name: 'azure-openai-api-key', value: azureOpenAiApiKey }
       ]
     }
     template: {
@@ -266,10 +284,12 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'JWT_EXPIRES_IN', value: '1h' }
             { name: 'JWT_REFRESH_SECRET', secretRef: 'jwt-refresh-secret' }
             { name: 'JWT_REFRESH_EXPIRES_IN', value: '7d' }
-            // AI
-            { name: 'ANTHROPIC_API_KEY', secretRef: 'anthropic-api-key' }
-            { name: 'ANTHROPIC_MODEL', value: 'claude-sonnet-4-20250514' }
-            { name: 'ANTHROPIC_MAX_TOKENS', value: '4096' }
+            // AI (Azure OpenAI)
+            { name: 'AZURE_OPENAI_API_KEY', secretRef: 'azure-openai-api-key' }
+            { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAiEndpoint }
+            { name: 'AZURE_OPENAI_DEPLOYMENT_NAME', value: azureOpenAiDeploymentName }
+            { name: 'AZURE_OPENAI_API_VERSION', value: '2024-12-01-preview' }
+            { name: 'AZURE_OPENAI_MAX_TOKENS', value: '4096' }
             // Queue
             { name: 'BULL_QUEUE_PREFIX', value: 'procgenie' }
             { name: 'BULL_QUEUE_DEFAULT_ATTEMPTS', value: '3' }

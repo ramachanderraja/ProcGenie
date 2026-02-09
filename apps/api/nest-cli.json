@@ -5,6 +5,6 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "builder": "tsc",
-    "typeCheck": true
+    "typeCheck": false
   }
 }

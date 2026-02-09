@@ -38,13 +38,19 @@
         "secretName": "jwt-refresh-secret"
       }
     },
-    "anthropicApiKey": {
+    "azureOpenAiApiKey": {
       "reference": {
         "keyVault": {
           "id": "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RG_NAME>/providers/Microsoft.KeyVault/vaults/<KV_NAME>"
         },
-        "secretName": "anthropic-api-key"
+        "secretName": "azure-openai-api-key"
       }
+    },
+    "azureOpenAiEndpoint": {
+      "value": "https://westus.api.cognitive.microsoft.com/"
+    },
+    "azureOpenAiDeploymentName": {
+      "value": "gpt-4o"
     },
     "tags": {
       "value": {

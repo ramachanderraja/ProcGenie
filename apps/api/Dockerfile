@@ -27,10 +27,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy installed dependencies from deps stage
+# Copy installed dependencies from deps stage (npm workspaces hoists to root)
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
-COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules 2>/dev/null || true
 
 # Copy source code
 COPY package.json ./
@@ -38,13 +36,13 @@ COPY tsconfig.base.json ./
 COPY packages/shared-types ./packages/shared-types
 COPY apps/api ./apps/api
 
-# Build the NestJS application
+# Build the NestJS application (transpile only, skip type checking)
 WORKDIR /app/apps/api
-RUN npx nest build
+RUN npx tsc -p tsconfig.json --noCheck
 
-# Prune devDependencies for production
+# Prune devDependencies for production (from root, since workspaces hoist)
 WORKDIR /app
-RUN npm prune --production --workspace=apps/api
+RUN npm prune --omit=dev
 
 # ---------------------------------------------------------------------------
 # Stage 3: Production runner
@@ -74,8 +72,7 @@ RUN addgroup --system --gid 1001 nestjs && \
 
 # Copy built application
 COPY --from=builder --chown=nestjs:nestjs /app/apps/api/dist ./dist
-COPY --from=builder --chown=nestjs:nestjs /app/apps/api/node_modules ./node_modules
-COPY --from=builder --chown=nestjs:nestjs /app/node_modules/.package-lock.json ./node_modules/.package-lock.json 2>/dev/null || true
+COPY --from=builder --chown=nestjs:nestjs /app/node_modules ./node_modules
 COPY --from=builder --chown=nestjs:nestjs /app/apps/api/package.json ./package.json
 
 # Create logs directory

@@ -69,7 +69,8 @@ Environment Variables:
   POSTGRES_ADMIN_PASSWORD   PostgreSQL admin password (required)
   JWT_SECRET                JWT signing secret (required)
   JWT_REFRESH_SECRET        JWT refresh signing secret (required)
-  ANTHROPIC_API_KEY         Anthropic API key for Claude AI (required)
+  AZURE_OPENAI_API_KEY      Azure OpenAI API key (required)
+  AZURE_OPENAI_ENDPOINT     Azure OpenAI endpoint URL (required)
 
 Examples:
   $(basename "$0") --env dev
@@ -107,7 +108,8 @@ validate_secrets() {
     [[ -z "${POSTGRES_ADMIN_PASSWORD:-}" ]] && missing+=("POSTGRES_ADMIN_PASSWORD")
     [[ -z "${JWT_SECRET:-}" ]] && missing+=("JWT_SECRET")
     [[ -z "${JWT_REFRESH_SECRET:-}" ]] && missing+=("JWT_REFRESH_SECRET")
-    [[ -z "${ANTHROPIC_API_KEY:-}" ]] && missing+=("ANTHROPIC_API_KEY")
+    [[ -z "${AZURE_OPENAI_API_KEY:-}" ]] && missing+=("AZURE_OPENAI_API_KEY")
+    [[ -z "${AZURE_OPENAI_ENDPOINT:-}" ]] && missing+=("AZURE_OPENAI_ENDPOINT")
 
     if [[ ${#missing[@]} -gt 0 ]]; then
         log_error "Missing required environment variables:"
@@ -184,6 +186,8 @@ main() {
         --name "${RESOURCE_GROUP}" \
         --location "${LOCATION}" \
         --tags project="${PROJECT_NAME}" environment="${ENVIRONMENT}" managedBy=bicep \
+            documentTeam=Architecture projectName=IT \
+            Owner=RRamachander Department=R-and-D CostCenter=GEPRnD \
         --output none
 
     log_success "Resource group '${RESOURCE_GROUP}' ready in ${LOCATION}"
@@ -193,16 +197,14 @@ main() {
     # -----------------------------------------------------------------------
     log_step "Step 3: Deploying Infrastructure (Bicep)"
 
-    local deploy_cmd="az deployment sub"
+    local deploy_action="create"
 
     if [[ "${DRY_RUN}" == "true" ]]; then
-        deploy_cmd+=" validate"
+        deploy_action="validate"
         log_info "Running in dry-run mode (validation only)..."
-    else
-        deploy_cmd+=" create"
     fi
 
-    ${deploy_cmd} \
+    az deployment sub ${deploy_action} \
         --name "procgenie-${ENVIRONMENT}-$(date +%Y%m%d%H%M%S)" \
         --location "${LOCATION}" \
         --template-file "${BICEP_DIR}/main.bicep" \
@@ -213,7 +215,9 @@ main() {
             postgresAdminPassword="${POSTGRES_ADMIN_PASSWORD}" \
             jwtSecret="${JWT_SECRET}" \
             jwtRefreshSecret="${JWT_REFRESH_SECRET}" \
-            anthropicApiKey="${ANTHROPIC_API_KEY}" \
+            azureOpenAiApiKey="${AZURE_OPENAI_API_KEY}" \
+            azureOpenAiEndpoint="${AZURE_OPENAI_ENDPOINT}" \
+            azureOpenAiDeploymentName="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4o}" \
         --output none
 
     if [[ "${DRY_RUN}" == "true" ]]; then

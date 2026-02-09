@@ -27,10 +27,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy installed dependencies from deps stage
+# Copy installed dependencies from deps stage (npm workspaces hoists to root)
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
-COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules 2>/dev/null || true
 
 # Copy source code
 COPY package.json ./

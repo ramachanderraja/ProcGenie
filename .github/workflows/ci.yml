@@ -146,7 +146,7 @@ jobs:
         run: npm ci
 
       - name: Run API tests
-        run: npm run test --workspace=apps/api --if-present
+        run: npx --workspace=apps/api jest --passWithNoTests
         env:
           CI: true
           NODE_ENV: test
@@ -163,7 +163,7 @@ jobs:
           JWT_REFRESH_SECRET: ci-test-jwt-refresh-secret
 
       - name: Run API e2e tests
-        run: npm run test:e2e --workspace=apps/api --if-present
+        run: npx --workspace=apps/api jest --config ./test/jest-e2e.json --passWithNoTests
         env:
           CI: true
           NODE_ENV: test

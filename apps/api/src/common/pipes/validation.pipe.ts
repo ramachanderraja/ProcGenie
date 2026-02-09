@@ -37,9 +37,10 @@ export class CustomValidationPipe implements PipeTransform {
     return object;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   private toValidate(metatype: Function): boolean {
-    const types: Function[] = [String, Boolean, Number, Array, Object];
-    return !types.includes(metatype);
+    const types: Array<new (...args: unknown[]) => unknown> = [String, Boolean, Number, Array, Object];
+    return !types.includes(metatype as new (...args: unknown[]) => unknown);
   }
 
   private formatErrors(

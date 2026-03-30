@@ -152,13 +152,14 @@ export class WorkflowEngineService {
         await this.handleEndNode(instance, node);
         return;
 
-      default:
+      default: {
         this.logger.warn(`Unknown node type: ${node.type}, skipping`);
         const nextEdge = this.findOutgoingEdge(graph, nodeId);
         if (nextEdge) {
           await this.executeStep(instance, nextEdge.target, definition);
         }
         return;
+      }
     }
   }
 
@@ -280,11 +281,12 @@ export class WorkflowEngineService {
       };
 
       switch (node.type) {
-        case 'start':
+        case 'start': {
           step.result = 'entered';
           const startEdge = this.findOutgoingEdge(graph, node.id);
           currentNodeId = startEdge?.target || null;
           break;
+        }
 
         case 'condition': {
           const condResult = this.evaluateCondition(
@@ -299,37 +301,41 @@ export class WorkflowEngineService {
           break;
         }
 
-        case 'approval':
+        case 'approval': {
           step.result = 'would_pause_for_approval';
           step.approvers = node.data.approvers;
           // In test mode, assume approval
           const approvalEdge = this.findOutgoingEdge(graph, node.id, 'approved');
           currentNodeId = approvalEdge?.target || null;
           break;
+        }
 
-        case 'action':
+        case 'action': {
           step.result = `would_execute: ${node.data.actionType}`;
           const actionEdge = this.findOutgoingEdge(graph, node.id);
           currentNodeId = actionEdge?.target || null;
           break;
+        }
 
-        case 'ai_review':
+        case 'ai_review': {
           step.result = 'would_call_ai_review';
           // In test mode, assume above threshold
           const aiEdge = this.findOutgoingEdge(graph, node.id, 'above_threshold');
           currentNodeId = aiEdge?.target || null;
           break;
+        }
 
         case 'end':
           step.result = `final_status: ${node.data.finalStatus || 'completed'}`;
           currentNodeId = null;
           break;
 
-        default:
+        default: {
           step.result = 'skipped_unknown_type';
           const defEdge = this.findOutgoingEdge(graph, node.id);
           currentNodeId = defEdge?.target || null;
           break;
+        }
       }
 
       trace.push(step);
@@ -382,9 +388,8 @@ export class WorkflowEngineService {
 
       // Handle role: and user: prefixes
       if (approverId.startsWith('role:')) {
-        // For role-based approvers, use the role name as a placeholder approver ID
+        // For role-based approvers, keep as-is (stored in approval metadata)
         // In a real system, this would resolve to actual users with that role
-        approverId = approverId; // Keep as-is, stored in approval metadata
       } else if (approverId.startsWith('user:')) {
         approverId = approverId.substring(5);
       }

@@ -53,7 +53,7 @@ export class HealthController {
     try {
       // Clear tables
       const tables = ['workflow_instances','agent_decision_logs','agent_tasks','agents','notifications','three_way_matches','invoices','goods_receipts','po_line_items','purchase_orders','request_items','requests','request_templates','evaluation_criteria','bids','sourcing_projects','contract_clauses','approvals','contracts','sync_jobs','integrations','connectors','regulatory_alerts','carbon_footprints','esg_scores','supplier_performance_scores','supplier_risk_profiles','supplier_documents','catalog_items','suppliers','workflow_steps','workflows','user_roles','users','role_permissions','permissions','roles'];
-      for (const t of tables) { try { await qr.query(`DELETE FROM "${t}"`); } catch {} }
+      for (const t of tables) { try { await qr.query(`DELETE FROM "${t}"`); } catch { /* ignore missing tables */ } }
 
       // 1. Roles
       this.logger.log('Seeding roles...');

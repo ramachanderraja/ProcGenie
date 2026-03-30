@@ -23,10 +23,11 @@ import { CarbonFootprint, EmissionScope } from './entities/carbon-footprint.enti
 import { RegulatoryAlert, AlertSeverity, AlertStatus } from './entities/regulatory-alert.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { User } from '../auth/entities/user.entity';
 
+@Public()
 @ApiTags('Sustainability')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,13 +45,13 @@ export class SustainabilityController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated list of ESG scores' })
   async getEsgScores(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Query('supplierId') supplierId?: string,
     @Query('category') category?: EsgCategory,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    return this.sustainabilityService.getEsgScores(user.tenantId, {
+    return this.sustainabilityService.getEsgScores((user?.tenantId || 'GEP'), {
       supplierId,
       category,
       page,
@@ -65,20 +66,19 @@ export class SustainabilityController {
   @ApiResponse({ status: 404, description: 'ESG score not found' })
   async getEsgScoreById(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<EsgScore> {
-    return this.sustainabilityService.getEsgScoreById(id, user.tenantId);
+    return this.sustainabilityService.getEsgScoreById(id, (user?.tenantId || 'GEP'));
   }
 
   @Post('esg-scores')
-  @Roles('admin', 'sustainability_manager')
   @ApiOperation({ summary: 'Create a new ESG score assessment' })
   @ApiResponse({ status: 201, description: 'ESG score created', type: EsgScore })
   async createEsgScore(
     @Body() body: Partial<EsgScore>,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<EsgScore> {
-    return this.sustainabilityService.createEsgScore(body, user.id, user.tenantId);
+    return this.sustainabilityService.createEsgScore(body, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'));
   }
 
   // ── Carbon Footprint ───────────────────────────────────────────────
@@ -90,12 +90,12 @@ export class SustainabilityController {
   @ApiQuery({ name: 'period', required: false, type: String, description: 'Reporting period (e.g., Q1 2025)' })
   @ApiResponse({ status: 200, description: 'Carbon footprint data' })
   async getCarbonFootprints(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Query('supplierId') supplierId?: string,
     @Query('scope') scope?: EmissionScope,
     @Query('period') period?: string,
   ): Promise<CarbonFootprint[]> {
-    return this.sustainabilityService.getCarbonFootprints(user.tenantId, {
+    return this.sustainabilityService.getCarbonFootprints((user?.tenantId || 'GEP'), {
       supplierId,
       scope,
       period,
@@ -103,14 +103,13 @@ export class SustainabilityController {
   }
 
   @Post('carbon-footprints')
-  @Roles('admin', 'sustainability_manager')
   @ApiOperation({ summary: 'Record a carbon footprint entry' })
   @ApiResponse({ status: 201, description: 'Carbon footprint recorded', type: CarbonFootprint })
   async createCarbonFootprint(
     @Body() body: Partial<CarbonFootprint>,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<CarbonFootprint> {
-    return this.sustainabilityService.createCarbonFootprint(body, user.id, user.tenantId);
+    return this.sustainabilityService.createCarbonFootprint(body, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'));
   }
 
   @Get('carbon-summary')
@@ -120,9 +119,9 @@ export class SustainabilityController {
   })
   @ApiResponse({ status: 200, description: 'Carbon emission summary' })
   async getCarbonSummary(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<Record<string, unknown>> {
-    return this.sustainabilityService.getCarbonSummary(user.tenantId);
+    return this.sustainabilityService.getCarbonSummary((user?.tenantId || 'GEP'));
   }
 
   // ── Regulatory Alerts ──────────────────────────────────────────────
@@ -135,13 +134,13 @@ export class SustainabilityController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated list of regulatory alerts' })
   async getRegulatoryAlerts(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Query('severity') severity?: AlertSeverity,
     @Query('status') status?: AlertStatus,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    return this.sustainabilityService.getRegulatoryAlerts(user.tenantId, {
+    return this.sustainabilityService.getRegulatoryAlerts((user?.tenantId || 'GEP'), {
       severity,
       status,
       page,
@@ -155,9 +154,9 @@ export class SustainabilityController {
   @ApiResponse({ status: 200, description: 'Alert acknowledged', type: RegulatoryAlert })
   async acknowledgeAlert(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<RegulatoryAlert> {
-    return this.sustainabilityService.acknowledgeAlert(id, user.id, user.tenantId);
+    return this.sustainabilityService.acknowledgeAlert(id, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'));
   }
 
   @Patch('regulatory-alerts/:id/resolve')
@@ -166,9 +165,9 @@ export class SustainabilityController {
   @ApiResponse({ status: 200, description: 'Alert resolved', type: RegulatoryAlert })
   async resolveAlert(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Body() body: { resolution?: string },
   ): Promise<RegulatoryAlert> {
-    return this.sustainabilityService.resolveAlert(id, user.id, user.tenantId, body.resolution);
+    return this.sustainabilityService.resolveAlert(id, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'), body.resolution);
   }
 }

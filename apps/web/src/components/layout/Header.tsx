@@ -1,14 +1,11 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Search, Bell } from 'lucide-react';
-import { useState } from 'react';
-import { mockNotifications } from '@/services/mockData';
+import { useState, useCallback } from 'react';
 
 function getPageTitle(pathname: string): string {
-  // Remove leading slash and take first segment
   const segment = pathname.split('/').filter(Boolean)[0] || 'dashboard';
-  // Capitalize and replace dashes with spaces
   return segment
     .split('-')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -17,11 +14,31 @@ function getPageTitle(pathname: string): string {
 
 export function Header() {
   const pathname = usePathname() ?? '/dashboard';
+  const router = useRouter();
   const pageTitle = getPageTitle(pathname);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
 
-  const unreadCount = mockNotifications.filter((n) => !n.read).length;
+  const handleSearchSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (searchQuery.trim()) {
+        router.push(`/requests?search=${encodeURIComponent(searchQuery.trim())}`);
+        setSearchQuery('');
+      }
+    },
+    [searchQuery, router],
+  );
+
+  // Static notifications for now (no notification API endpoint)
+  const notifications = [
+    { id: '1', title: 'New approval request', message: 'AWS Reserved Instances Q2 is pending your approval', type: 'info', read: false },
+    { id: '2', title: 'Contract expiring soon', message: 'Adobe Creative Cloud license expires in 30 days', type: 'warning', read: false },
+    { id: '3', title: 'PO approved', message: 'PO-2026-001 for Google Workspace has been approved', type: 'success', read: true },
+    { id: '4', title: 'Risk alert', message: 'Dell Technologies risk scan shows neutral sentiment', type: 'warning', read: true },
+  ];
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6">
@@ -31,7 +48,7 @@ export function Header() {
       {/* Right section */}
       <div className="flex items-center gap-4">
         {/* Search */}
-        <div className="relative">
+        <form onSubmit={handleSearchSubmit} className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
@@ -40,7 +57,7 @@ export function Header() {
             onChange={(e) => setSearchQuery(e.target.value)}
             className="h-9 w-72 rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-4 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 transition-all"
           />
-        </div>
+        </form>
 
         {/* Notification bell */}
         <div className="relative">
@@ -61,7 +78,7 @@ export function Header() {
                 <h3 className="text-sm font-semibold text-slate-900">Notifications</h3>
               </div>
               <div className="max-h-80 overflow-y-auto">
-                {mockNotifications.map((notification) => (
+                {notifications.map((notification) => (
                   <div
                     key={notification.id}
                     className={`border-b border-slate-50 px-4 py-3 ${

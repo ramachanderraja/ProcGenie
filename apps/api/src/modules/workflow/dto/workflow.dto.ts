@@ -9,6 +9,7 @@ import {
   IsNumber,
   IsBoolean,
   IsUUID,
+  IsObject,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -76,11 +77,23 @@ export class CreateWorkflowDto {
   @IsOptional()
   escalationRules?: Record<string, unknown>;
 
-  @ApiProperty({ type: [CreateWorkflowStepDto] })
+  @ApiPropertyOptional({ type: [CreateWorkflowStepDto], description: 'Legacy step-based workflow definition' })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateWorkflowStepDto)
-  steps: CreateWorkflowStepDto[];
+  @IsOptional()
+  steps?: CreateWorkflowStepDto[];
+
+  @ApiPropertyOptional({ description: 'Entity types this workflow applies to', example: ['REQUEST', 'CONTRACT'] })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  entityTypes?: string[];
+
+  @ApiPropertyOptional({ description: 'React Flow graph JSON with nodes and edges' })
+  @IsObject()
+  @IsOptional()
+  graph?: Record<string, unknown>;
 }
 
 export class UpdateWorkflowDto extends PartialType(CreateWorkflowDto) {}
@@ -99,4 +112,11 @@ export class ApprovalActionDto {
   @IsUUID()
   @IsOptional()
   delegateTo?: string;
+}
+
+export class TestWorkflowDto {
+  @ApiProperty({ description: 'Sample entity data for dry-run test' })
+  @IsObject()
+  @IsNotEmpty()
+  entityData: Record<string, unknown>;
 }

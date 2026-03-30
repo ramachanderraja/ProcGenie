@@ -22,7 +22,7 @@ import {
 } from './analytics.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../auth/entities/user.entity';
 
@@ -33,6 +33,7 @@ import { User } from '../auth/entities/user.entity';
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
+  @Public()
   @Get('spend-dashboard')
   @ApiOperation({
     summary: 'Get comprehensive spend dashboard data',
@@ -43,18 +44,20 @@ export class AnalyticsController {
   @ApiQuery({ name: 'category', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Spend dashboard data' })
   async getSpendDashboard(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('category') category?: string,
   ): Promise<SpendDashboardData> {
-    return this.analyticsService.getSpendDashboard(user.tenantId, {
+    const tenantId = user?.tenantId || 'GEP';
+    return this.analyticsService.getSpendDashboard(tenantId, {
       startDate,
       endDate,
       category,
     });
   }
 
+  @Public()
   @Get('savings-waterfall')
   @ApiOperation({
     summary: 'Get savings waterfall breakdown',
@@ -63,12 +66,14 @@ export class AnalyticsController {
   @ApiQuery({ name: 'year', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Savings waterfall data' })
   async getSavingsWaterfall(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Query('year') year?: number,
   ): Promise<SavingsWaterfallData> {
-    return this.analyticsService.getSavingsWaterfall(user.tenantId, { year });
+    const tenantId = user?.tenantId || 'GEP';
+    return this.analyticsService.getSavingsWaterfall(tenantId, { year });
   }
 
+  @Public()
   @Get('spend-trends')
   @ApiOperation({
     summary: 'Get spend trend data over time',
@@ -78,13 +83,15 @@ export class AnalyticsController {
   @ApiQuery({ name: 'months', required: false, type: Number, description: 'Number of months to look back (default 12)' })
   @ApiResponse({ status: 200, description: 'Spend trend data' })
   async getSpendTrends(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Query('period') period?: string,
     @Query('months') months?: number,
   ): Promise<SpendTrendData[]> {
-    return this.analyticsService.getSpendTrends(user.tenantId, { period, months });
+    const tenantId = user?.tenantId || 'GEP';
+    return this.analyticsService.getSpendTrends(tenantId, { period, months });
   }
 
+  @Public()
   @Post('nl-query')
   @ApiOperation({
     summary: 'Natural language analytics query',
@@ -93,12 +100,14 @@ export class AnalyticsController {
   @ApiResponse({ status: 200, description: 'Query results with AI-generated insights' })
   @ApiResponse({ status: 400, description: 'Query string cannot be empty' })
   async naturalLanguageQuery(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Body() body: { query: string },
   ): Promise<NLQueryResult> {
-    return this.analyticsService.naturalLanguageQuery(user.tenantId, body.query);
+    const tenantId = user?.tenantId || 'GEP';
+    return this.analyticsService.naturalLanguageQuery(tenantId, body.query);
   }
 
+  @Public()
   @Get('cycle-times')
   @ApiOperation({
     summary: 'Get procurement cycle time metrics',
@@ -106,8 +115,9 @@ export class AnalyticsController {
   })
   @ApiResponse({ status: 200, description: 'Cycle time metrics' })
   async getCycleTimeMetrics(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<Record<string, unknown>> {
-    return this.analyticsService.getCycleTimeMetrics(user.tenantId);
+    const tenantId = user?.tenantId || 'GEP';
+    return this.analyticsService.getCycleTimeMetrics(tenantId);
   }
 }

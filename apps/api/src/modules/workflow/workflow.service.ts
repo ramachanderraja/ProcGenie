@@ -3,6 +3,8 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -10,6 +12,7 @@ import { Workflow, WorkflowStatus } from './entities/workflow.entity';
 import { WorkflowStep } from './entities/workflow-step.entity';
 import { Approval, ApprovalStatus } from './entities/approval.entity';
 import { SLA, SlaStatus } from './entities/sla.entity';
+import { WorkflowInstance, WorkflowInstanceStatus } from './entities/workflow-instance.entity';
 import {
   CreateWorkflowDto,
   UpdateWorkflowDto,
@@ -20,6 +23,9 @@ import {
 export class WorkflowService {
   private readonly logger = new Logger(WorkflowService.name);
 
+  // Lazy-injected to avoid circular dependency with WorkflowEngineService
+  private _workflowEngineService: any;
+
   constructor(
     @InjectRepository(Workflow)
     private readonly workflowRepository: Repository<Workflow>,
@@ -29,23 +35,36 @@ export class WorkflowService {
     private readonly approvalRepository: Repository<Approval>,
     @InjectRepository(SLA)
     private readonly slaRepository: Repository<SLA>,
+    @InjectRepository(WorkflowInstance)
+    private readonly instanceRepository: Repository<WorkflowInstance>,
   ) {}
+
+  /**
+   * Set the engine service reference (called from module onModuleInit to avoid circular dep).
+   */
+  setEngineService(engine: any): void {
+    this._workflowEngineService = engine;
+  }
 
   async createWorkflow(
     dto: CreateWorkflowDto,
     userId: string,
     tenantId: string,
   ): Promise<Workflow> {
+    const steps = dto.steps
+      ? dto.steps.map((step) => {
+          const s = new WorkflowStep();
+          Object.assign(s, step);
+          s.tenantId = tenantId;
+          return s;
+        })
+      : [];
+
     const workflow = this.workflowRepository.create({
       ...dto,
       createdBy: userId,
       tenantId,
-      steps: dto.steps.map((step) => {
-        const s = new WorkflowStep();
-        Object.assign(s, step);
-        s.tenantId = tenantId;
-        return s;
-      }),
+      steps,
     });
 
     const saved = await this.workflowRepository.save(workflow);
@@ -108,7 +127,76 @@ export class WorkflowService {
     return this.workflowRepository.save(workflow);
   }
 
-  // Approval management
+  async archiveWorkflow(id: string, tenantId: string): Promise<Workflow> {
+    const workflow = await this.findWorkflow(id, tenantId);
+    workflow.status = WorkflowStatus.ARCHIVED;
+    return this.workflowRepository.save(workflow);
+  }
+
+  // ── Workflow Instance methods ─────────────────────────────────────
+
+  async findAllInstances(
+    tenantId: string,
+    filters?: { status?: string; entityType?: string },
+  ): Promise<{ data: WorkflowInstance[]; total: number }> {
+    const where: Record<string, any> = { tenantId };
+    if (filters?.status) {
+      where.status = filters.status;
+    }
+    if (filters?.entityType) {
+      where.entityType = filters.entityType;
+    }
+
+    const [data, total] = await this.instanceRepository.findAndCount({
+      where,
+      order: { startedAt: 'DESC' },
+      take: 50,
+    });
+
+    return { data, total };
+  }
+
+  async findInstance(id: string, tenantId: string): Promise<WorkflowInstance> {
+    const instance = await this.instanceRepository.findOne({
+      where: { id, tenantId },
+    });
+
+    if (!instance) {
+      throw new NotFoundException(`Workflow instance ${id} not found`);
+    }
+
+    return instance;
+  }
+
+  async cancelInstance(id: string, tenantId: string): Promise<WorkflowInstance> {
+    const instance = await this.findInstance(id, tenantId);
+
+    if (
+      instance.status !== WorkflowInstanceStatus.RUNNING &&
+      instance.status !== WorkflowInstanceStatus.PAUSED
+    ) {
+      throw new BadRequestException(
+        `Cannot cancel instance in status: ${instance.status}`,
+      );
+    }
+
+    instance.status = WorkflowInstanceStatus.CANCELLED;
+    instance.completedAt = new Date();
+    instance.history = [
+      ...(instance.history || []),
+      {
+        stepId: 'system',
+        stepType: 'cancel',
+        action: 'cancelled_by_user',
+        timestamp: new Date().toISOString(),
+      },
+    ];
+
+    return this.instanceRepository.save(instance);
+  }
+
+  // ── Approval management ───────────────────────────────────────────
+
   async getPendingApprovals(
     userId: string,
     tenantId: string,
@@ -159,6 +247,23 @@ export class WorkflowService {
       `Approval ${approvalId} ${dto.action} by user ${userId}`,
     );
 
+    // Resume workflow engine if an approval was approved or rejected
+    if (
+      this._workflowEngineService &&
+      (dto.action === ApprovalStatus.APPROVED || dto.action === ApprovalStatus.REJECTED)
+    ) {
+      const approvalResult = dto.action === ApprovalStatus.APPROVED ? 'approved' : 'rejected';
+      try {
+        await this._workflowEngineService.resumeFromApproval(
+          approval.entityType,
+          approval.entityId,
+          approvalResult,
+        );
+      } catch (error) {
+        this.logger.error(`Failed to resume workflow after approval: ${error.message}`);
+      }
+    }
+
     return saved;
   }
 
@@ -196,7 +301,8 @@ export class WorkflowService {
     return saved;
   }
 
-  // SLA management
+  // ── SLA management ────────────────────────────────────────────────
+
   async getSlaStatus(
     entityType: string,
     entityId: string,
@@ -220,6 +326,12 @@ export class WorkflowService {
       where: { tenantId, status: SlaStatus.AT_RISK },
       order: { dueDate: 'ASC' },
     });
+  }
+
+  // ── Helper: count workflows (for seed check) ─────────────────────
+
+  async countWorkflows(tenantId: string): Promise<number> {
+    return this.workflowRepository.count({ where: { tenantId } });
   }
 
   private async createSla(

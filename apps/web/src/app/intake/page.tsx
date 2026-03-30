@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Send,
@@ -17,7 +18,15 @@ import {
   AlertTriangle,
   Loader2,
 } from 'lucide-react';
-import { mockCatalogItems } from '@/services/mockData';
+import {
+  getCatalog,
+  createRequest,
+  submitRequest,
+  analyzeIntake,
+  type CatalogItem,
+  type IntakeAnalysisResult,
+} from '@/services/api';
+import { useApi } from '@/hooks/useApi';
 
 type Step = 'prompt' | 'catalog' | 'review';
 
@@ -26,6 +35,10 @@ interface AIAnalysis {
   channel: string;
   complianceNotes: string[];
   estimatedSavings: string;
+  suggestedSuppliers?: string[];
+  recommendations?: string[];
+  suggestedCategory?: string;
+  confidenceScore?: number;
 }
 
 const buyingChannels = [
@@ -65,10 +78,15 @@ const categories = [
 ];
 
 export default function IntakePage() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>('prompt');
   const [prompt, setPrompt] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
+
+  // Load catalog from API
+  const { data: catalogItems, loading: catalogLoading } = useApi(() => getCatalog(), []);
 
   // Review form state
   const [title, setTitle] = useState('');
@@ -76,16 +94,37 @@ export default function IntakePage() {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [apiAnalysis, setApiAnalysis] = useState<IntakeAnalysisResult | null>(null);
 
-  const handlePromptSubmit = () => {
+  const handlePromptSubmit = async () => {
     if (!prompt.trim()) return;
     setAnalyzing(true);
 
-    // Simulate AI analysis
-    setTimeout(() => {
-      setAnalyzing(false);
-      setStep('catalog');
-    }, 1000);
+    try {
+      const result = await analyzeIntake({
+        description: prompt,
+        estimatedBudget: undefined,
+        departmentContext: undefined,
+      });
+      setApiAnalysis(result);
+      // Auto-fill category suggestion
+      if (result.suggestedCategory) {
+        const catMap: Record<string, string> = {
+          goods: 'Hardware',
+          services: 'Professional Services',
+          software: 'Software',
+          materials: 'Raw Materials',
+          facilities: 'Facilities',
+          consulting: 'Professional Services',
+        };
+        setCategory(catMap[result.suggestedCategory] || '');
+      }
+    } catch {
+      // Continue without AI analysis
+    }
+
+    setAnalyzing(false);
+    setStep('catalog');
   };
 
   const handleSelectItem = (id: string) => {
@@ -95,40 +134,85 @@ export default function IntakePage() {
   };
 
   const handleProceedToReview = () => {
+    const items = catalogItems ?? [];
     // Pre-fill from selected items
     if (selectedItems.length > 0) {
-      const item = mockCatalogItems.find((c) => c.id === selectedItems[0]);
+      const item = items.find((c) => c.id === selectedItems[0]);
       if (item) {
         setTitle(item.name);
-        setVendor(item.vendorName);
+        setVendor(item.supplierName ?? 'Unknown vendor');
         setAmount(
           String(selectedItems.reduce((sum, id) => {
-            const ci = mockCatalogItems.find((c) => c.id === id);
-            return sum + (ci ? ci.price : 0);
+            const ci = items.find((c) => c.id === id);
+            return sum + (ci ? ci.unitPrice : 0);
           }, 0))
         );
       }
     }
     setStep('review');
 
-    // Simulate AI analysis
-    setTimeout(() => {
+    // Use API analysis data if available, otherwise show default
+    if (apiAnalysis) {
+      const riskText = apiAnalysis.riskAssessment || '';
+      const riskScore = riskText.toLowerCase().includes('high') ? 65
+        : riskText.toLowerCase().includes('medium') ? 45
+        : 22;
       setAiAnalysis({
-        riskScore: 22,
+        riskScore,
         channel: 'Catalog',
-        complianceNotes: [
+        complianceNotes: apiAnalysis.recommendations?.slice(0, 3) || [
           'All items from preferred vendors',
           'Within delegated authority limits',
-          'Standard catalog pricing verified',
         ],
-        estimatedSavings: '12%',
+        estimatedSavings: apiAnalysis.estimatedCost
+          ? `${Math.round(((parseFloat(amount) || apiAnalysis.estimatedCost) - apiAnalysis.estimatedCost) / (parseFloat(amount) || apiAnalysis.estimatedCost) * -100)}%`
+          : '12%',
+        suggestedSuppliers: apiAnalysis.suggestedSuppliers,
+        recommendations: apiAnalysis.recommendations,
+        suggestedCategory: apiAnalysis.suggestedCategory,
+        confidenceScore: apiAnalysis.confidenceScore,
       });
-    }, 1000);
+    } else {
+      setTimeout(() => {
+        setAiAnalysis({
+          riskScore: 22,
+          channel: 'Catalog',
+          complianceNotes: [
+            'All items from preferred vendors',
+            'Within delegated authority limits',
+            'Standard catalog pricing verified',
+          ],
+          estimatedSavings: '12%',
+        });
+      }, 500);
+    }
   };
 
-  const handleSubmitForApproval = () => {
-    // In a real app, this would submit to the API
-    alert('Request submitted for approval!');
+  const handleSubmitForApproval = async () => {
+    setSubmitting(true);
+    try {
+      // Create the request
+      const created = await createRequest({
+        title: title || prompt.slice(0, 80),
+        description: prompt,
+        category: category || 'OTHER',
+        items: selectedItems.map(itemId => {
+          const item = (catalogItems ?? []).find(c => c.id === itemId);
+          return {
+            description: item?.name ?? 'Selected item',
+            quantity: 1,
+            estimatedUnitPrice: item?.unitPrice ?? 0,
+          };
+        }),
+      });
+      // Submit for approval
+      await submitRequest(created.id);
+      router.push(`/requests/${created.id}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to submit request');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -268,55 +352,76 @@ export default function IntakePage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {mockCatalogItems.map((item) => {
-              const isSelected = selectedItems.includes(item.id);
-              return (
+          {catalogLoading ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {[1, 2, 3, 4].map((i) => (
                 <div
-                  key={item.id}
-                  className={`rounded-2xl border bg-white p-5 shadow-sm transition-all cursor-pointer ${
-                    isSelected
-                      ? 'border-indigo-400 ring-2 ring-indigo-100'
-                      : 'border-slate-200 hover:border-slate-300 hover:shadow-md'
-                  }`}
-                  onClick={() => handleSelectItem(item.id)}
+                  key={i}
+                  className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm animate-pulse"
                 >
-                  {/* Placeholder image area */}
-                  <div className="mb-4 flex h-24 items-center justify-center rounded-xl bg-slate-50">
-                    <ShoppingCart className="h-8 w-8 text-slate-300" />
+                  <div className="mb-4 flex h-24 items-center justify-center rounded-xl bg-slate-100" />
+                  <div className="h-4 w-3/4 rounded bg-slate-100 mb-2" />
+                  <div className="h-3 w-1/2 rounded bg-slate-100 mb-3" />
+                  <div className="flex items-center justify-between">
+                    <div className="h-6 w-20 rounded bg-slate-100" />
+                    <div className="h-4 w-10 rounded bg-slate-100" />
                   </div>
-
-                  <h4 className="text-sm font-semibold text-slate-900 line-clamp-2">{item.name}</h4>
-                  <p className="mt-1 text-xs text-slate-500">{item.vendorName}</p>
-
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-lg font-bold text-slate-900">
-                      ${item.price.toLocaleString()}
-                    </span>
-                    <div className="flex items-center gap-0.5">
-                      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                      <span className="text-xs font-medium text-slate-600">4.5</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 flex items-center gap-1 text-xs text-slate-400">
-                    <Clock className="h-3 w-3" />
-                    {item.deliveryTime}
-                  </div>
-
-                  <button
-                    className={`mt-4 w-full rounded-lg py-2 text-xs font-semibold transition-colors ${
-                      isSelected
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {isSelected ? 'Selected' : 'Select'}
-                  </button>
+                  <div className="mt-2 h-3 w-1/3 rounded bg-slate-100" />
+                  <div className="mt-4 h-8 w-full rounded-lg bg-slate-100" />
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {(catalogItems ?? []).map((item) => {
+                const isSelected = selectedItems.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className={`rounded-2xl border bg-white p-5 shadow-sm transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-indigo-400 ring-2 ring-indigo-100'
+                        : 'border-slate-200 hover:border-slate-300 hover:shadow-md'
+                    }`}
+                    onClick={() => handleSelectItem(item.id)}
+                  >
+                    {/* Placeholder image area */}
+                    <div className="mb-4 flex h-24 items-center justify-center rounded-xl bg-slate-50">
+                      <ShoppingCart className="h-8 w-8 text-slate-300" />
+                    </div>
+
+                    <h4 className="text-sm font-semibold text-slate-900 line-clamp-2">{item.name}</h4>
+                    <p className="mt-1 text-xs text-slate-500">{item.supplierName ?? 'Unknown vendor'}</p>
+
+                    <div className="mt-3 flex items-center justify-between">
+                      <span className="text-lg font-bold text-slate-900">
+                        ${item.unitPrice.toLocaleString()}
+                      </span>
+                      <div className="flex items-center gap-0.5">
+                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                        <span className="text-xs font-medium text-slate-600">4.5</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex items-center gap-1 text-xs text-slate-400">
+                      <Clock className="h-3 w-3" />
+                      Standard delivery
+                    </div>
+
+                    <button
+                      className={`mt-4 w-full rounded-lg py-2 text-xs font-semibold transition-colors ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {isSelected ? 'Selected' : 'Select'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -396,9 +501,17 @@ export default function IntakePage() {
               {/* Submit */}
               <button
                 onClick={handleSubmitForApproval}
-                className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 transition-colors"
+                disabled={submitting}
+                className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center justify-center gap-2"
               >
-                Submit for Approval
+                {submitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  'Submit for Approval'
+                )}
               </button>
             </div>
 
@@ -449,11 +562,31 @@ export default function IntakePage() {
                       <p className="mt-0.5 text-lg font-bold text-emerald-600">{aiAnalysis.estimatedSavings}</p>
                     </div>
 
-                    {/* Compliance Notes */}
+                    {/* Suggested Suppliers */}
+                    {aiAnalysis.suggestedSuppliers && aiAnalysis.suggestedSuppliers.length > 0 && (
+                      <div>
+                        <span className="text-xs font-medium text-slate-500">Suggested Suppliers</span>
+                        <ul className="mt-2 space-y-1">
+                          {aiAnalysis.suggestedSuppliers.slice(0, 3).map((supplier, i) => (
+                            <li key={i} className="text-xs text-slate-600 font-medium">{supplier}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* AI Confidence */}
+                    {aiAnalysis.confidenceScore != null && (
+                      <div>
+                        <span className="text-xs font-medium text-slate-500">AI Confidence</span>
+                        <p className="mt-0.5 text-sm font-semibold text-indigo-600">{aiAnalysis.confidenceScore}%</p>
+                      </div>
+                    )}
+
+                    {/* Recommendations */}
                     <div>
-                      <span className="text-xs font-medium text-slate-500">Compliance Notes</span>
+                      <span className="text-xs font-medium text-slate-500">Recommendations</span>
                       <ul className="mt-2 space-y-1.5">
-                        {aiAnalysis.complianceNotes.map((note, i) => (
+                        {(aiAnalysis.recommendations || aiAnalysis.complianceNotes).map((note, i) => (
                           <li key={i} className="flex items-start gap-2 text-xs text-slate-600">
                             <ShieldCheck className="mt-0.5 h-3 w-3 flex-shrink-0 text-emerald-500" />
                             {note}

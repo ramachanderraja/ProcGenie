@@ -45,17 +45,38 @@ const statusColors: Record<string, { dot: string; bg: string; text: string }> = 
   // Purple statuses
   'Idle': { dot: 'bg-purple-500', bg: 'bg-purple-50', text: 'text-purple-700' },
   'Paused': { dot: 'bg-purple-500', bg: 'bg-purple-50', text: 'text-purple-700' },
+  // Additional API statuses (normalized forms)
+  'Fully Received': { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
+  'Partially Received': { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
+  'Invoiced': { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
+  'Executed': { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
+  'Terminated': { dot: 'bg-red-500', bg: 'bg-red-50', text: 'text-red-700' },
+  'Bidding Open': { dot: 'bg-blue-500', bg: 'bg-blue-50', text: 'text-blue-700' },
+  'Bidding Closed': { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
+  'Published': { dot: 'bg-blue-500', bg: 'bg-blue-50', text: 'text-blue-700' },
+  'Payment Scheduled': { dot: 'bg-blue-500', bg: 'bg-blue-50', text: 'text-blue-700' },
+  'Pending Match': { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
+  'Pending Payment': { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
 };
 
 const defaultColor = { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' };
 
+/** Normalize API status like "pending_approval" → "Pending Approval" for lookup & display */
+function normalizeStatus(status: string): string {
+  return status
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
 export function StatusBadge({ status }: StatusBadgeProps) {
-  const colors = statusColors[status] || defaultColor;
+  const display = normalizeStatus(status);
+  const colors = statusColors[status] || statusColors[display] || defaultColor;
 
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${colors.bg} ${colors.text}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${colors.dot}`} />
-      {status}
+      {display}
     </span>
   );
 }

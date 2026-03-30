@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrder, PoStatus } from './entities/purchase-order.entity';
 import { LineItem } from './entities/line-item.entity';
 import { GoodsReceipt, GoodsReceiptStatus } from './entities/goods-receipt.entity';
@@ -31,6 +32,7 @@ export class BuyingService {
     private readonly grRepository: Repository<GoodsReceipt>,
     @InjectRepository(CatalogItem)
     private readonly catalogRepository: Repository<CatalogItem>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async createPurchaseOrder(
@@ -83,7 +85,6 @@ export class BuyingService {
 
     const queryBuilder = this.poRepository
       .createQueryBuilder('po')
-      .leftJoinAndSelect('po.lineItems', 'lineItems')
       .where('po.tenant_id = :tenantId', { tenantId });
 
     if (options?.status) {
@@ -157,7 +158,17 @@ export class BuyingService {
     }
 
     po.status = PoStatus.PENDING_APPROVAL;
-    return this.poRepository.save(po);
+    const saved = await this.poRepository.save(po);
+
+    // Emit event for workflow engine
+    this.eventEmitter.emit('po.submitted', {
+      entityType: 'PURCHASE_ORDER',
+      entityId: id,
+      entity: saved,
+      tenantId,
+    });
+
+    return saved;
   }
 
   async approvePurchaseOrder(id: string, tenantId: string): Promise<PurchaseOrder> {

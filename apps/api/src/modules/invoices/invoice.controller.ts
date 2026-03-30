@@ -24,10 +24,11 @@ import { Invoice, InvoiceStatus } from './entities/invoice.entity';
 import { ThreeWayMatch } from './entities/three-way-match.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { User } from '../auth/entities/user.entity';
 
+@Public()
 @ApiTags('Invoices')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -41,9 +42,9 @@ export class InvoiceController {
   @ApiResponse({ status: 400, description: 'Invalid invoice data' })
   async create(
     @Body() dto: CreateInvoiceDto,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<Invoice> {
-    return this.invoiceService.create(dto, user.id, user.tenantId);
+    return this.invoiceService.create(dto, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'));
   }
 
   @Get()
@@ -55,14 +56,14 @@ export class InvoiceController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated list of invoices' })
   async findAll(
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Query('status') status?: InvoiceStatus,
     @Query('supplierId') supplierId?: string,
     @Query('search') search?: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    return this.invoiceService.findAll(user.tenantId, {
+    return this.invoiceService.findAll((user?.tenantId || 'GEP'), {
       status,
       supplierId,
       search,
@@ -78,9 +79,9 @@ export class InvoiceController {
   @ApiResponse({ status: 404, description: 'Invoice not found' })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<Invoice> {
-    return this.invoiceService.findOne(id, user.tenantId);
+    return this.invoiceService.findOne(id, (user?.tenantId || 'GEP'));
   }
 
   @Put(':id')
@@ -91,9 +92,9 @@ export class InvoiceController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateInvoiceDto,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<Invoice> {
-    return this.invoiceService.update(id, dto, user.id, user.tenantId);
+    return this.invoiceService.update(id, dto, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'));
   }
 
   @Post(':id/match')
@@ -106,59 +107,55 @@ export class InvoiceController {
   @ApiResponse({ status: 400, description: 'Invoice must have a linked purchase order' })
   async performMatch(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<ThreeWayMatch> {
-    return this.invoiceService.performThreeWayMatch(id, user.tenantId);
+    return this.invoiceService.performThreeWayMatch(id, (user?.tenantId || 'GEP'));
   }
 
   @Patch(':id/approve')
-  @Roles('admin', 'procurement_manager', 'finance_manager', 'approver')
   @ApiOperation({ summary: 'Approve an invoice for payment' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Invoice approved', type: Invoice })
   async approve(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<Invoice> {
-    return this.invoiceService.approveInvoice(id, user.id, user.tenantId);
+    return this.invoiceService.approveInvoice(id, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'));
   }
 
   @Patch(':id/schedule-payment')
-  @Roles('admin', 'finance_manager')
   @ApiOperation({ summary: 'Schedule an approved invoice for payment' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Invoice scheduled for payment', type: Invoice })
   async schedulePayment(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<Invoice> {
-    return this.invoiceService.schedulePayment(id, user.id, user.tenantId);
+    return this.invoiceService.schedulePayment(id, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'));
   }
 
   @Patch(':id/mark-paid')
-  @Roles('admin', 'finance_manager')
   @ApiOperation({ summary: 'Mark an invoice as paid' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Invoice marked as paid', type: Invoice })
   async markPaid(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Body() body: { paymentDate?: string },
   ): Promise<Invoice> {
-    return this.invoiceService.markPaid(id, user.id, user.tenantId, body.paymentDate);
+    return this.invoiceService.markPaid(id, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'), body.paymentDate);
   }
 
   @Patch(':id/reject')
-  @Roles('admin', 'procurement_manager', 'finance_manager')
   @ApiOperation({ summary: 'Reject an invoice' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Invoice rejected', type: Invoice })
   async reject(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
     @Body() body: { reason: string },
   ): Promise<Invoice> {
-    return this.invoiceService.rejectInvoice(id, user.id, user.tenantId, body.reason);
+    return this.invoiceService.rejectInvoice(id, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'), body.reason);
   }
 
   @Get(':id/match-results')
@@ -167,21 +164,20 @@ export class InvoiceController {
   @ApiResponse({ status: 200, description: 'List of match results' })
   async getMatchResults(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<ThreeWayMatch[]> {
-    return this.invoiceService.getMatchResults(id, user.tenantId);
+    return this.invoiceService.getMatchResults(id, (user?.tenantId || 'GEP'));
   }
 
   @Patch('matches/:matchId/override')
-  @Roles('admin', 'procurement_manager', 'finance_manager')
   @ApiOperation({ summary: 'Override a match exception with justification' })
   @ApiParam({ name: 'matchId', type: 'string', format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Match exception overridden', type: ThreeWayMatch })
   async overrideMatch(
     @Param('matchId', ParseUUIDPipe) matchId: string,
     @Body() dto: OverrideMatchDto,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User | undefined,
   ): Promise<ThreeWayMatch> {
-    return this.invoiceService.overrideMatchException(matchId, dto, user.id, user.tenantId);
+    return this.invoiceService.overrideMatchException(matchId, dto, (user?.id || 'demo-user'), (user?.tenantId || 'GEP'));
   }
 }

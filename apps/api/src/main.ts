@@ -1,10 +1,10 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
-import * as helmet from 'helmet';
-import * as compression from 'compression';
+import helmet from 'helmet';
+import compression from 'compression';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
@@ -19,7 +19,7 @@ async function bootstrap(): Promise<void> {
   const configService = app.get(ConfigService);
 
   // Security
-  app.use(helmet.default());
+  app.use(helmet());
   app.use(compression());
 
   // CORS
@@ -31,13 +31,9 @@ async function bootstrap(): Promise<void> {
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-Id', 'X-Request-Id'],
   });
 
-  // API Prefix & Versioning
+  // API Prefix
   const apiPrefix = configService.get<string>('app.apiPrefix', 'api/v1');
   app.setGlobalPrefix(apiPrefix);
-  app.enableVersioning({
-    type: VersioningType.URI,
-    defaultVersion: '1',
-  });
 
   // Global Pipes
   app.useGlobalPipes(

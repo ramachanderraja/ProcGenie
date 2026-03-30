@@ -4,6 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AiService } from '../../common/services/ai.service';
 
 export interface SpendDashboardData {
   totalSpend: number;
@@ -50,7 +51,10 @@ export interface NLQueryResult {
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly aiService: AiService,
+  ) {}
 
   async getSpendDashboard(
     tenantId: string,
@@ -201,8 +205,28 @@ export class AnalyticsService {
     tenantId: string,
     query: string,
   ): Promise<NLQueryResult> {
-    // Placeholder for actual Azure OpenAI SDK call
-    return this.mockNlQuery(query);
+    const systemPrompt = `You are an expert procurement analytics assistant for ProcGenie, a Fortune 500 Source-to-Pay platform.
+The user is asking a natural language question about their procurement data.
+
+Here is context about the organization's procurement data:
+- Total annual spend: ~$24.5M across 6 categories
+- Top categories: IT Equipment ($8.2M), Professional Services ($5.8M), Software Licenses ($4.2M)
+- 156 active suppliers, 342 active POs, 89 pending invoices
+- Contract compliance rate: 87.5%
+- Average savings rate: 13.1%
+
+Respond with a JSON object containing exactly these fields:
+- query: string (the original query repeated)
+- interpretation: string (1-2 sentence interpretation of what the user is asking)
+- data: object with { summary: string, totalRecords: number, keyInsight: string, topCategory: string, recommendation: string, details: array of { metric: string, value: string|number, trend: string } }
+- visualization: string (one of: "bar_chart", "line_chart", "pie_chart", "table", "metric_card")
+- confidence: number (0-100)`;
+
+    return this.aiService.chatCompletionJson<NLQueryResult>(
+      systemPrompt,
+      `User Query: ${query}`,
+      { temperature: 0.4 },
+    );
   }
 
   private mockNlQuery(query: string): NLQueryResult {

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Link2, Plus, RefreshCw, CheckCircle2, XCircle } from 'lucide-react';
-import { mockIntegrations } from '@/services/mockData';
+import { Plus, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { listIntegrations, activateIntegration, deactivateIntegration, testConnection, type Integration } from '@/services/api';
+import { useApi } from '@/hooks/useApi';
 
 function healthColor(health: number) {
   if (health >= 95) return 'bg-emerald-500';
@@ -30,9 +31,62 @@ const iconColors: Record<string, string> = {
 };
 
 export default function IntegrationsPage() {
-  const [connections, setConnections] = useState<Record<string, boolean>>(
-    Object.fromEntries(mockIntegrations.map(i => [i.id, i.status === 'Connected']))
-  );
+  const { data: integrations, loading, error, refetch } = useApi<Integration[]>(() => listIntegrations(), []);
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+
+  const allIntegrations = integrations ?? [];
+  const connectedCount = allIntegrations.filter(i => i.status === 'Connected' || i.status === 'Active').length;
+
+  const handleToggleConnection = async (integration: Integration) => {
+    setActionLoading(prev => ({ ...prev, [integration.id]: true }));
+    try {
+      const isConnected = integration.status === 'Connected' || integration.status === 'Active';
+      if (isConnected) {
+        await deactivateIntegration(integration.id);
+      } else {
+        await activateIntegration(integration.id);
+      }
+      refetch();
+    } catch {
+      alert('Failed to update integration status');
+    } finally {
+      setActionLoading(prev => ({ ...prev, [integration.id]: false }));
+    }
+  };
+
+  const handleTestConnection = async (id: string) => {
+    setActionLoading(prev => ({ ...prev, [`test-${id}`]: true }));
+    try {
+      const result = await testConnection(id);
+      alert(result.success ? `Connection successful (${result.latencyMs}ms)` : `Connection failed: ${result.message}`);
+    } catch {
+      alert('Test connection failed');
+    } finally {
+      setActionLoading(prev => ({ ...prev, [`test-${id}`]: false }));
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+        <span className="ml-3 text-sm text-slate-500">Loading integrations...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <AlertCircle className="h-8 w-8 text-red-400 mx-auto mb-2" />
+          <p className="text-sm text-red-600">Failed to load integrations</p>
+          <p className="text-xs text-slate-500 mt-1">{error}</p>
+          <button onClick={refetch} className="mt-3 text-sm text-indigo-600 hover:underline">Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -40,14 +94,14 @@ export default function IntegrationsPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Integrations</h1>
         <p className="mt-1 text-sm text-slate-500">
-          {mockIntegrations.filter(i => i.status === 'Connected').length} of {mockIntegrations.length} integrations connected
+          {connectedCount} of {allIntegrations.length} integrations connected
         </p>
       </div>
 
       {/* Integration Cards Grid */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {mockIntegrations.map(integration => {
-          const isConnected = connections[integration.id];
+        {allIntegrations.map(integration => {
+          const isConnected = integration.status === 'Connected' || integration.status === 'Active';
           return (
             <div key={integration.id} className="relative rounded-2xl bg-white border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow overflow-hidden">
               {/* Connected Banner */}
@@ -75,7 +129,7 @@ export default function IntegrationsPage() {
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">Last Sync</span>
                   <span className="font-medium text-slate-700">
-                    {integration.lastSync ? new Date(integration.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never'}
+                    {integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never'}
                   </span>
                 </div>
 
@@ -98,22 +152,34 @@ export default function IntegrationsPage() {
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">Records Synced</span>
                   <span className="font-medium font-mono text-slate-700">
-                    {integration.recordsSynced > 0 ? integration.recordsSynced.toLocaleString() : '--'}
+                    {integration.totalRecordsSynced > 0 ? integration.totalRecordsSynced.toLocaleString() : '--'}
                   </span>
                 </div>
               </div>
 
               {/* Connect/Disconnect Toggle */}
-              <button
-                onClick={() => setConnections(prev => ({ ...prev, [integration.id]: !prev[integration.id] }))}
-                className={`w-full rounded-lg py-2 text-xs font-medium transition-colors ${
-                  isConnected
-                    ? 'bg-red-50 text-red-600 hover:bg-red-100'
-                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                }`}
-              >
-                {isConnected ? 'Disconnect' : 'Connect'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleToggleConnection(integration)}
+                  disabled={actionLoading[integration.id]}
+                  className={`flex-1 rounded-lg py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
+                    isConnected
+                      ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                  }`}
+                >
+                  {actionLoading[integration.id] ? 'Processing...' : isConnected ? 'Disconnect' : 'Connect'}
+                </button>
+                {isConnected && (
+                  <button
+                    onClick={() => handleTestConnection(integration.id)}
+                    disabled={actionLoading[`test-${integration.id}`]}
+                    className="rounded-lg py-2 px-3 text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50"
+                  >
+                    {actionLoading[`test-${integration.id}`] ? '...' : 'Test'}
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

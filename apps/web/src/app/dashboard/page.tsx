@@ -16,7 +16,16 @@ import {
 } from 'lucide-react';
 import { StatCard } from '@/components/ui/StatCard';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { mockRequests, mockActivityFeed, mockAgents } from '@/services/mockData';
+import {
+  getSpendDashboard,
+  listRequests,
+  listAgents,
+  type SpendDashboardData,
+  type IntakeRequest,
+  type PaginatedResult,
+  type Agent,
+} from '@/services/api';
+import { useApi } from '@/hooks/useApi';
 
 const quickActions = [
   { label: 'New Request', icon: PlusCircle, href: '/intake', color: 'bg-indigo-600 hover:bg-indigo-700' },
@@ -24,15 +33,6 @@ const quickActions = [
   { label: 'Renew Contract', icon: RefreshCw, href: '/contracts', color: 'bg-white hover:bg-slate-50 border border-slate-200 !text-slate-700' },
   { label: 'Check Policy', icon: ShieldCheck, href: '/settings', color: 'bg-white hover:bg-slate-50 border border-slate-200 !text-slate-700' },
 ];
-
-const activityTypeIcons: Record<string, string> = {
-  approval: 'text-emerald-500',
-  request: 'text-blue-500',
-  contract: 'text-purple-500',
-  vendor: 'text-amber-500',
-  system: 'text-slate-400',
-  ai: 'text-indigo-500',
-};
 
 function formatCurrency(value: number): string {
   if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
@@ -49,19 +49,43 @@ function formatAmount(amount: number): string {
   }).format(amount);
 }
 
-function timeAgo(timestamp: string): string {
-  const diff = Date.now() - new Date(timestamp).getTime();
-  const hours = Math.floor(diff / 3600000);
-  if (hours < 1) return 'Just now';
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+function formatDate(isoDate: string): string {
+  try {
+    return new Date(isoDate).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return isoDate;
+  }
 }
 
 export default function DashboardPage() {
-  const topAgents = [...mockAgents]
-    .sort((a, b) => b.savingsGenerated - a.savingsGenerated)
+  const { data: dashData } = useApi<SpendDashboardData>(
+    () => getSpendDashboard(),
+    [],
+  );
+  const { data: requestsData } = useApi<PaginatedResult<IntakeRequest>>(
+    () => listRequests({ limit: 10 }),
+    [],
+  );
+  const { data: agentsData } = useApi<Agent[]>(
+    () => listAgents(),
+    [],
+  );
+
+  const requests = requestsData?.items ?? [];
+  const agents = agentsData ?? [];
+
+  const topAgents = [...agents]
+    .sort((a, b) => b.totalSavingsGenerated - a.totalSavingsGenerated)
     .slice(0, 3);
+
+  const totalSpend = dashData ? formatCurrency(dashData.totalSpend) : '$2.4M';
+  const totalSavings = dashData ? formatCurrency(dashData.totalSavings) : '$342K';
+  const activePOs = dashData?.activePOs ?? 23;
+  const pendingInvoices = dashData?.pendingInvoices ?? 7;
 
   return (
     <div className="space-y-6">
@@ -98,10 +122,10 @@ export default function DashboardPage() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="In-Flight Spend" value="$2.4M" icon={Banknote} color="indigo" trend="+8%" trendUp />
-        <StatCard label="Pending My Action" value={7} icon={Clock} color="amber" />
-        <StatCard label="Approved MTD" value={23} icon={FileCheck} color="green" trend="+12%" trendUp />
-        <StatCard label="Savings Identified" value="$342K" icon={TrendingUp} color="indigo" />
+        <StatCard label="In-Flight Spend" value={totalSpend} icon={Banknote} color="indigo" trend="+8%" trendUp />
+        <StatCard label="Pending Invoices" value={pendingInvoices} icon={Clock} color="amber" />
+        <StatCard label="Active POs" value={activePOs} icon={FileCheck} color="green" trend="+12%" trendUp />
+        <StatCard label="Savings Identified" value={totalSavings} icon={TrendingUp} color="indigo" />
       </div>
 
       {/* Quick Actions */}
@@ -149,33 +173,41 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {mockRequests.map((request) => (
-                    <tr key={request.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="whitespace-nowrap px-6 py-3">
-                        <span className="font-mono text-xs text-slate-500">{request.id}</span>
-                      </td>
-                      <td className="px-6 py-3">
-                        <Link
-                          href={`/requests/${request.id}`}
-                          className="text-sm font-medium text-slate-900 hover:text-indigo-600 transition-colors"
-                        >
-                          {request.title}
-                        </Link>
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-3 text-sm text-slate-600">
-                        {request.requester}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium text-slate-900">
-                        {formatAmount(request.amount)}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-3">
-                        <StatusBadge status={request.status} />
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-3 text-sm text-slate-500">
-                        {request.createdAt}
+                  {requests.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-8 text-center text-sm text-slate-400">
+                        No intake requests yet. Start by creating a new request.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    requests.map((request) => (
+                      <tr key={request.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="whitespace-nowrap px-6 py-3">
+                          <span className="font-mono text-xs text-slate-500">{request.requestNumber || request.id}</span>
+                        </td>
+                        <td className="px-6 py-3">
+                          <Link
+                            href={`/requests/${request.id}`}
+                            className="text-sm font-medium text-slate-900 hover:text-indigo-600 transition-colors"
+                          >
+                            {request.title}
+                          </Link>
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-3 text-sm text-slate-600">
+                          {request.requesterId}
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium text-slate-900">
+                          {formatAmount(request.estimatedTotal)}
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-3">
+                          <StatusBadge status={request.status} />
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-3 text-sm text-slate-500">
+                          {formatDate(request.createdAt)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -189,22 +221,8 @@ export default function DashboardPage() {
             <div className="border-b border-slate-100 px-5 py-4">
               <h3 className="text-base font-semibold text-slate-900">Recent Activity</h3>
             </div>
-            <div className="divide-y divide-slate-50">
-              {mockActivityFeed.slice(0, 6).map((entry) => (
-                <div key={entry.id} className="px-5 py-3">
-                  <div className="flex items-start gap-3">
-                    <div className={`mt-0.5 h-2 w-2 flex-shrink-0 rounded-full ${activityTypeIcons[entry.type] ? activityTypeIcons[entry.type].replace('text-', 'bg-') : 'bg-slate-400'}`} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-slate-700">
-                        <span className="font-medium">{entry.user}</span>{' '}
-                        {entry.action}{' '}
-                        <span className="font-medium">{entry.target}</span>
-                      </p>
-                      <p className="mt-0.5 text-xs text-slate-400">{timeAgo(entry.timestamp)}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="px-5 py-8 text-center">
+              <p className="text-sm text-slate-400">Recent activity coming soon</p>
             </div>
           </div>
 
@@ -217,20 +235,26 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="divide-y divide-slate-50 px-5">
-              {topAgents.map((agent) => (
-                <div key={agent.id} className="flex items-center justify-between py-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-slate-900">{agent.name}</p>
-                    <p className="text-xs text-slate-500">{agent.tasksCompleted.toLocaleString()} tasks completed</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-emerald-600">
-                      {formatCurrency(agent.savingsGenerated)}
-                    </p>
-                    <p className="text-xs text-slate-400">savings</p>
-                  </div>
+              {topAgents.length === 0 ? (
+                <div className="py-6 text-center">
+                  <p className="text-sm text-slate-400">No agents available</p>
                 </div>
-              ))}
+              ) : (
+                topAgents.map((agent) => (
+                  <div key={agent.id} className="flex items-center justify-between py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-900">{agent.name}</p>
+                      <p className="text-xs text-slate-500">{agent.totalTasksCompleted.toLocaleString()} tasks completed</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-emerald-600">
+                        {formatCurrency(agent.totalSavingsGenerated)}
+                      </p>
+                      <p className="text-xs text-slate-400">savings</p>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
             <div className="border-t border-slate-100 px-5 py-3">
               <Link

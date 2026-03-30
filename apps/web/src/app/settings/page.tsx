@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Settings as SettingsIcon, Users, CheckSquare, Bell, Shield, Brain, Save } from 'lucide-react';
-import { mockAgents } from '@/services/mockData';
+import { Settings as SettingsIcon, Users, CheckSquare, Bell, Shield, Brain, Save, Loader2 } from 'lucide-react';
+import { listAgents, type Agent } from '@/services/api';
+import { useApi } from '@/hooks/useApi';
 
 const tabs = [
   { id: 'general', label: 'General', icon: SettingsIcon },
@@ -54,6 +55,21 @@ export default function SettingsPage() {
   const [emailNotifs, setEmailNotifs] = useState<Record<string, boolean>>(Object.fromEntries(notifEvents.map(e => [e, true])));
   const [slackNotifs, setSlackNotifs] = useState<Record<string, boolean>>(Object.fromEntries(notifEvents.map((e, i) => [e, i < 5])));
   const [inAppNotifs, setInAppNotifs] = useState<Record<string, boolean>>(Object.fromEntries(notifEvents.map(e => [e, true])));
+
+  const { data: agents, loading: agentsLoading } = useApi<Agent[]>(() => listAgents(), []);
+
+  const handleSave = (section: string) => {
+    try {
+      if (section === 'general') {
+        localStorage.setItem('settings_general', JSON.stringify({ orgName, currency, timezone }));
+      } else if (section === 'security') {
+        localStorage.setItem('settings_security', JSON.stringify({ mfaEnabled, ssoProvider, sessionTimeout }));
+      }
+      alert('Settings saved');
+    } catch {
+      alert('Failed to save settings');
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -129,7 +145,10 @@ export default function SettingsPage() {
                 <option>Asia/Tokyo</option>
               </select>
             </div>
-            <button className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors">
+            <button
+              onClick={() => handleSave('general')}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+            >
               <Save className="h-4 w-4" /> Save Changes
             </button>
           </div>
@@ -293,7 +312,10 @@ export default function SettingsPage() {
                 className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
               />
             </div>
-            <button className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors">
+            <button
+              onClick={() => handleSave('security')}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+            >
               <Save className="h-4 w-4" /> Save Security Settings
             </button>
           </div>
@@ -307,25 +329,40 @@ export default function SettingsPage() {
             {/* Per-Agent Autonomy */}
             <div>
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Agent Autonomy Levels</h3>
-              <div className="space-y-2">
-                {mockAgents.slice(0, 10).map(agent => (
-                  <div key={agent.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-4 py-3">
-                    <div>
-                      <span className="text-sm font-medium text-slate-900">{agent.name}</span>
-                      <span className="ml-2 text-xs text-slate-400">{agent.domain}</span>
+              {agentsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+                  <span className="ml-3 text-sm text-slate-500">Loading agents...</span>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {(agents ?? []).slice(0, 10).map(agent => (
+                    <div key={agent.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-4 py-3">
+                      <div>
+                        <span className="text-sm font-medium text-slate-900">{agent.name}</span>
+                        <span className="ml-2 text-xs text-slate-400">{agent.domain}</span>
+                        <div className="flex gap-3 mt-1">
+                          <span className="text-[10px] text-slate-400">Tasks: {agent.totalTasksCompleted}</span>
+                          <span className="text-[10px] text-slate-400">Accuracy: {agent.averageAccuracy?.toFixed(1) ?? '0'}%</span>
+                          <span className="text-[10px] text-slate-400">HITL: {agent.hitlThreshold}</span>
+                        </div>
+                      </div>
+                      <select
+                        defaultValue={agent.autonomyLevel}
+                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                      >
+                        <option>Level 4 - Autonomous</option>
+                        <option>Level 3 - Supervised</option>
+                        <option>Level 2 - Advisory</option>
+                        <option>Level 1 - Manual</option>
+                      </select>
                     </div>
-                    <select
-                      defaultValue={agent.autonomyLevel}
-                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                    >
-                      <option>Level 4 - Autonomous</option>
-                      <option>Level 3 - Supervised</option>
-                      <option>Level 2 - Advisory</option>
-                      <option>Level 1 - Manual</option>
-                    </select>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                  {(agents ?? []).length === 0 && !agentsLoading && (
+                    <p className="text-sm text-slate-500 text-center py-4">No agents found</p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Global Guardrails */}

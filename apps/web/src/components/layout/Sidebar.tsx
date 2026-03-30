@@ -19,8 +19,10 @@ import {
   Link2,
   Settings,
   Sparkles,
+  Workflow,
 } from 'lucide-react';
-import { mockRequests } from '@/services/mockData';
+import { useApi } from '@/hooks/useApi';
+import { listRequests } from '@/services/api';
 
 interface NavItem {
   label: string;
@@ -34,55 +36,59 @@ interface NavSection {
   items: NavItem[];
 }
 
-const pendingApprovalCount = mockRequests.filter(
-  (r) => r.status === 'Pending Approval'
-).length;
-
-const navSections: NavSection[] = [
-  {
-    title: 'MAIN',
-    items: [
-      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-      { label: 'New Request', href: '/intake', icon: PlusCircle },
-      { label: 'My Approvals', href: '/approvals', icon: Inbox, badge: pendingApprovalCount },
-      { label: 'My Requests', href: '/requests', icon: FileText },
-    ],
-  },
-  {
-    title: 'PROCUREMENT',
-    items: [
-      { label: 'Contracts', href: '/contracts', icon: ScrollText },
-      { label: 'Sourcing', href: '/sourcing', icon: Target },
-      { label: 'Purchase Orders', href: '/purchase-orders', icon: FileCheck },
-      { label: 'Invoices', href: '/invoices', icon: Receipt },
-    ],
-  },
-  {
-    title: 'MANAGEMENT',
-    items: [
-      { label: 'Vendors', href: '/vendors', icon: Building2 },
-      { label: 'AI Agents', href: '/agents', icon: Bot },
-      { label: 'Sustainability', href: '/sustainability', icon: Leaf },
-    ],
-  },
-  {
-    title: 'ANALYTICS',
-    items: [
-      { label: 'Insights', href: '/insights', icon: BarChart3 },
-      { label: 'Reports', href: '/reports', icon: PieChart },
-    ],
-  },
-  {
-    title: 'ADMIN',
-    items: [
-      { label: 'Integrations', href: '/integrations', icon: Link2 },
-      { label: 'Settings', href: '/settings', icon: Settings },
-    ],
-  },
-];
-
 export function Sidebar() {
   const pathname = usePathname() ?? '/dashboard';
+
+  // Fetch pending approval count from API
+  const { data: pendingData } = useApi(
+    () => listRequests({ status: 'PENDING_APPROVAL', limit: 1 }),
+    [],
+  );
+  const pendingApprovalCount = pendingData?.total ?? 0;
+
+  const navSections: NavSection[] = [
+    {
+      title: 'MAIN',
+      items: [
+        { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+        { label: 'New Request', href: '/intake', icon: PlusCircle },
+        { label: 'My Approvals', href: '/approvals', icon: Inbox, badge: pendingApprovalCount },
+        { label: 'My Requests', href: '/requests', icon: FileText },
+      ],
+    },
+    {
+      title: 'PROCUREMENT',
+      items: [
+        { label: 'Contracts', href: '/contracts', icon: ScrollText },
+        { label: 'Sourcing', href: '/sourcing', icon: Target },
+        { label: 'Purchase Orders', href: '/purchase-orders', icon: FileCheck },
+        { label: 'Invoices', href: '/invoices', icon: Receipt },
+      ],
+    },
+    {
+      title: 'MANAGEMENT',
+      items: [
+        { label: 'Vendors', href: '/vendors', icon: Building2 },
+        { label: 'AI Agents', href: '/agents', icon: Bot },
+        { label: 'Sustainability', href: '/sustainability', icon: Leaf },
+      ],
+    },
+    {
+      title: 'ANALYTICS',
+      items: [
+        { label: 'Insights', href: '/insights', icon: BarChart3 },
+        { label: 'Reports', href: '/reports', icon: PieChart },
+      ],
+    },
+    {
+      title: 'ADMIN',
+      items: [
+        { label: 'Integrations', href: '/integrations', icon: Link2 },
+        { label: 'Workflows', href: '/workflows', icon: Workflow },
+        { label: 'Settings', href: '/settings', icon: Settings },
+      ],
+    },
+  ];
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r border-slate-200 bg-white">

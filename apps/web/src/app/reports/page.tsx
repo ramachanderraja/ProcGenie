@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { PieChart, Search, FileBarChart, BarChart3, Users, ScrollText, ShieldCheck, Leaf, Download, Clock, ToggleLeft, ToggleRight } from 'lucide-react';
+import { PieChart, Search, FileBarChart, BarChart3, Users, ScrollText, ShieldCheck, Leaf, Download, Clock, ToggleLeft, ToggleRight, Loader2, Brain } from 'lucide-react';
+import { naturalLanguageQuery, type NLQueryResult } from '@/services/api';
 
 const reportTemplates = [
   { id: 'spend', title: 'Spend Analysis', description: 'Comprehensive breakdown of procurement spend by category, vendor, and department.', icon: BarChart3, color: 'bg-indigo-50 text-indigo-600' },
@@ -18,9 +19,71 @@ const scheduledReports = [
   { title: 'Quarterly Vendor Review', frequency: 'Quarterly', nextRun: 'Apr 1, 2026 9:00 AM', enabled: false },
 ];
 
+interface DetailItem {
+  metric: string;
+  value: string | number;
+  trend: string;
+}
+
+function NlQueryResultPanel({ result }: { result: NLQueryResult }) {
+  const data = result.data as Record<string, string | number | DetailItem[]> | null;
+  const keyInsight = data?.keyInsight ? String(data.keyInsight) : null;
+  const recommendation = data?.recommendation ? String(data.recommendation) : null;
+  const details = Array.isArray(data?.details) ? (data.details as DetailItem[]) : [];
+
+  return (
+    <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/50 p-4">
+      <p className="text-xs font-medium text-indigo-600 mb-2">
+        {'AI Analysis (Confidence: ' + result.confidence + '%)'}
+      </p>
+      <p className="text-sm text-slate-700 mb-3">{result.interpretation}</p>
+      <div className="space-y-2">
+        {keyInsight && (
+          <p className="text-sm font-medium text-slate-900">{keyInsight}</p>
+        )}
+        {recommendation && (
+          <p className="text-xs text-slate-600 italic">{'Recommendation: ' + recommendation}</p>
+        )}
+        {details.length > 0 && (
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {details.map((d, i) => (
+              <div key={i} className="rounded-lg bg-white border border-slate-100 p-2.5">
+                <p className="text-[11px] text-slate-500">{d.metric}</p>
+                <p className="text-sm font-semibold text-slate-900">{String(d.value)}</p>
+                {d.trend && <p className="text-[11px] text-emerald-600">{d.trend}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ReportsPage() {
   const [nlQuery, setNlQuery] = useState('');
+  const [nlResult, setNlResult] = useState<NLQueryResult | null>(null);
+  const [nlLoading, setNlLoading] = useState(false);
   const [subscriptions, setSubscriptions] = useState(scheduledReports.map(r => r.enabled));
+
+  const handleNlQuery = async (query: string) => {
+    if (!query.trim()) return;
+    setNlQuery(query);
+    setNlLoading(true);
+    setNlResult(null);
+    try {
+      const result = await naturalLanguageQuery(query);
+      setNlResult(result);
+    } catch {
+      setNlResult(null);
+    } finally {
+      setNlLoading(false);
+    }
+  };
+
+  const handleGenerate = (reportTitle: string) => {
+    alert(`Generating "${reportTitle}" report. This feature will be available in a future release.`);
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -32,12 +95,17 @@ export default function ReportsPage() {
 
       {/* NL Query Input */}
       <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Brain className="h-5 w-5 text-indigo-600" />
+          <h2 className="text-lg font-semibold text-slate-900">Ask About Your Data</h2>
+        </div>
         <div className="relative">
           <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={nlQuery}
             onChange={e => setNlQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleNlQuery(nlQuery); }}
             placeholder="Ask a question about your data..."
             className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-12 pr-4 py-3.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"
           />
@@ -46,13 +114,24 @@ export default function ReportsPage() {
           {['How much did we spend on software last quarter?', 'Which vendors have expiring contracts?', 'Show me top AI agent savings'].map(q => (
             <button
               key={q}
-              onClick={() => setNlQuery(q)}
+              onClick={() => handleNlQuery(q)}
               className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors"
             >
               {q}
             </button>
           ))}
         </div>
+
+        {/* NL Query Results */}
+        {nlLoading && (
+          <div className="mt-4 flex items-center gap-2 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Analyzing your question with AI...
+          </div>
+        )}
+        {nlResult && !nlLoading && (
+          <NlQueryResultPanel result={nlResult} />
+        )}
       </div>
 
       {/* Pre-built Report Templates */}
@@ -68,7 +147,10 @@ export default function ReportsPage() {
                 </div>
                 <h3 className="text-sm font-semibold text-slate-900 mb-1">{report.title}</h3>
                 <p className="text-xs leading-relaxed text-slate-500 mb-4">{report.description}</p>
-                <button className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-indigo-700 transition-colors">
+                <button
+                  onClick={() => handleGenerate(report.title)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+                >
                   <Download className="h-3.5 w-3.5" />
                   Generate
                 </button>

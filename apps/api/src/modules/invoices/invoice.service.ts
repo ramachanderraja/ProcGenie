@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Invoice, InvoiceStatus } from './entities/invoice.entity';
 import { ThreeWayMatch, MatchStatus, MatchType } from './entities/three-way-match.entity';
 import {
@@ -24,6 +25,7 @@ export class InvoiceService {
     private readonly invoiceRepository: Repository<Invoice>,
     @InjectRepository(ThreeWayMatch)
     private readonly matchRepository: Repository<ThreeWayMatch>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(
@@ -44,6 +46,15 @@ export class InvoiceService {
 
     const saved = await this.invoiceRepository.save(invoice);
     this.logger.log(`Invoice created: ${saved.invoiceNumber} by user ${userId}`);
+
+    // Emit event for workflow engine
+    this.eventEmitter.emit('invoice.created', {
+      entityType: 'INVOICE',
+      entityId: saved.id,
+      entity: saved,
+      tenantId,
+    });
+
     return saved;
   }
 

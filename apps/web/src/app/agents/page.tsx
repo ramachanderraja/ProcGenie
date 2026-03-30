@@ -1,7 +1,8 @@
 'use client';
 
-import { Bot, Zap, Target, DollarSign, Activity } from 'lucide-react';
-import { mockAgents } from '@/services/mockData';
+import { Bot, Zap, Target, DollarSign, Activity, Loader2, AlertCircle } from 'lucide-react';
+import { listAgents, type Agent } from '@/services/api';
+import { useApi } from '@/hooks/useApi';
 import { StatCard } from '@/components/ui/StatCard';
 
 const autonomyColors: Record<string, string> = {
@@ -31,17 +32,41 @@ const domainColors: Record<string, string> = {
   'Sourcing': 'bg-sky-50 text-sky-700',
 };
 
-const totalTasks = mockAgents.reduce((s, a) => s + a.tasksCompleted, 0);
-const avgAccuracy = (mockAgents.reduce((s, a) => s + a.accuracy, 0) / mockAgents.length).toFixed(1);
-const totalSavings = mockAgents.reduce((s, a) => s + a.savingsGenerated, 0);
-
-// Recent agent actions for timeline
-const recentActions = mockAgents
-  .filter(a => a.lastActive)
-  .sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime())
-  .slice(0, 8);
-
 export default function AgentsPage() {
+  const { data: agents, loading, error } = useApi(() => listAgents(), []);
+
+  const agentList = agents ?? [];
+  const totalTasks = agentList.reduce((s, a) => s + a.totalTasksCompleted, 0);
+  const avgAccuracy = agentList.length > 0
+    ? (agentList.reduce((s, a) => s + a.averageAccuracy, 0) / agentList.length).toFixed(1)
+    : '0.0';
+  const totalSavings = agentList.reduce((s, a) => s + a.totalSavingsGenerated, 0);
+
+  const recentActions = agentList
+    .filter(a => a.lastActiveAt)
+    .sort((a, b) => new Date(b.lastActiveAt!).getTime() - new Date(a.lastActiveAt!).getTime())
+    .slice(0, 8);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+        <span className="ml-3 text-sm text-slate-500">Loading agents...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <AlertCircle className="h-8 w-8 text-red-400 mx-auto mb-2" />
+          <p className="text-sm text-red-600">Failed to load agents: {error}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
@@ -52,15 +77,15 @@ export default function AgentsPage() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Agents Active" value={mockAgents.filter(a => a.status === 'Active').length} icon={Bot} color="indigo" />
-        <StatCard label="Tasks Today" value="247" icon={Zap} color="green" />
+        <StatCard label="Total Agents Active" value={agentList.filter(a => a.status === 'active').length} icon={Bot} color="indigo" />
+        <StatCard label="Tasks Completed" value={totalTasks.toLocaleString()} icon={Zap} color="green" />
         <StatCard label="Avg Accuracy" value={`${avgAccuracy}%`} icon={Target} color="indigo" />
         <StatCard label="Total Savings" value={`$${(totalSavings / 1000000).toFixed(1)}M`} icon={DollarSign} color="green" trend="+18% MoM" trendUp />
       </div>
 
       {/* Agent Cards Grid */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {mockAgents.map(agent => (
+        {agentList.map(agent => (
           <div key={agent.id} className="rounded-2xl bg-white border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow">
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center gap-3">
@@ -69,14 +94,14 @@ export default function AgentsPage() {
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900">{agent.name}</h3>
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${domainColors[agent.domain] || 'bg-slate-100 text-slate-700'}`}>
-                    {agent.domain}
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${domainColors[agent.domain ?? ''] || 'bg-slate-100 text-slate-700'}`}>
+                    {agent.domain ?? agent.type}
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${autonomyColors[agent.autonomyLevel] || 'bg-slate-100 text-slate-700'}`}>
-                  {agent.autonomyLevel}
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${autonomyColors[agent.autonomyLevel ?? ''] || 'bg-slate-100 text-slate-700'}`}>
+                  {agent.autonomyLevel ?? 'Autonomous'}
                 </span>
               </div>
             </div>
@@ -84,26 +109,26 @@ export default function AgentsPage() {
             {/* Status Dot */}
             <div className="flex items-center gap-1.5 mb-4">
               <span className={`h-2 w-2 rounded-full ${
-                agent.status === 'Active' ? 'bg-emerald-500 animate-pulse' :
-                agent.status === 'Idle' ? 'bg-amber-400' : 'bg-slate-400'
+                agent.status === 'active' ? 'bg-emerald-500 animate-pulse' :
+                agent.status === 'idle' ? 'bg-amber-400' : 'bg-slate-400'
               }`} />
-              <span className="text-xs text-slate-500">{agent.status}</span>
+              <span className="text-xs text-slate-500 capitalize">{agent.status}</span>
             </div>
 
             {/* Metrics */}
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-lg bg-slate-50 p-2.5">
                 <p className="text-[10px] font-medium text-slate-500 uppercase">Tasks</p>
-                <p className="text-lg font-bold text-slate-900">{agent.tasksCompleted.toLocaleString()}</p>
+                <p className="text-lg font-bold text-slate-900">{agent.totalTasksCompleted.toLocaleString()}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-2.5">
                 <p className="text-[10px] font-medium text-slate-500 uppercase">Accuracy</p>
-                <p className="text-lg font-bold text-slate-900">{agent.accuracy}%</p>
+                <p className="text-lg font-bold text-slate-900">{agent.averageAccuracy}%</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-2.5">
                 <p className="text-[10px] font-medium text-slate-500 uppercase">Savings</p>
                 <p className="text-lg font-bold text-emerald-600">
-                  {agent.savingsGenerated > 0 ? `$${(agent.savingsGenerated / 1000).toFixed(0)}K` : '--'}
+                  {agent.totalSavingsGenerated > 0 ? `$${(agent.totalSavingsGenerated / 1000).toFixed(0)}K` : '--'}
                 </p>
               </div>
               <div className="rounded-lg bg-slate-50 p-2.5">
@@ -125,17 +150,17 @@ export default function AgentsPage() {
           {recentActions.map((agent, i) => (
             <div key={agent.id} className="flex items-start gap-3">
               <div className="relative flex flex-col items-center">
-                <div className={`h-3 w-3 rounded-full ${agent.status === 'Active' ? 'bg-indigo-500' : 'bg-slate-300'}`} />
+                <div className={`h-3 w-3 rounded-full ${agent.status === 'active' ? 'bg-indigo-500' : 'bg-slate-300'}`} />
                 {i < recentActions.length - 1 && <div className="w-px h-full bg-slate-200 absolute top-3" />}
               </div>
               <div className="flex-1 pb-4">
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-slate-700">
                     <span className="font-semibold text-slate-900">{agent.name}</span>
-                    {' '}completed {agent.tasksCompleted.toLocaleString()} tasks with {agent.accuracy}% accuracy
+                    {' '}completed {agent.totalTasksCompleted.toLocaleString()} tasks with {agent.averageAccuracy}% accuracy
                   </p>
                   <span className="text-xs text-slate-400 whitespace-nowrap ml-4">
-                    {new Date(agent.lastActive).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(agent.lastActiveAt!).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
               </div>

@@ -7,6 +7,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AiService } from '../../common/services/ai.service';
 import { Request, RequestStatus } from './entities/request.entity';
 import { RequestItem } from './entities/request-item.entity';
 import { Draft } from './entities/draft.entity';
@@ -33,6 +35,8 @@ export class IntakeService {
     @InjectRepository(Template)
     private readonly templateRepository: Repository<Template>,
     private readonly configService: ConfigService,
+    private readonly aiService: AiService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async createRequest(
@@ -81,7 +85,6 @@ export class IntakeService {
 
     const queryBuilder = this.requestRepository
       .createQueryBuilder('request')
-      .leftJoinAndSelect('request.items', 'items')
       .where('request.tenant_id = :tenantId', { tenantId });
 
     if (options?.status) {
@@ -182,6 +185,15 @@ export class IntakeService {
     const saved = await this.requestRepository.save(request);
 
     this.logger.log(`Request submitted: ${saved.requestNumber} by user ${userId}`);
+
+    // Emit event for workflow engine
+    this.eventEmitter.emit('request.submitted', {
+      entityType: 'REQUEST',
+      entityId: id,
+      entity: saved,
+      tenantId,
+    });
+
     return saved;
   }
 
@@ -276,8 +288,27 @@ export class IntakeService {
   private async performAiAnalysis(
     dto: AnalyzeIntakeDto,
   ): Promise<IntakeAnalysisResponseDto> {
-    // Placeholder for actual Azure OpenAI SDK call
-    return this.mockAnalysis(dto);
+    const systemPrompt = `You are an expert procurement analyst for a Fortune 500 enterprise Source-to-Pay platform called ProcGenie.
+Analyze the following procurement request and provide structured recommendations.
+
+Respond with a JSON object containing exactly these fields:
+- suggestedCategory: string (one of: "goods", "services", "software", "materials", "facilities", "consulting")
+- suggestedSuppliers: string[] (3-5 recommended supplier company names relevant to the request)
+- estimatedCost: number (realistic cost estimate in USD)
+- riskAssessment: string (1-2 sentence risk assessment)
+- recommendations: string[] (3-5 actionable procurement recommendations)
+- confidenceScore: number (0-100 confidence in the analysis)
+- similarRequests: array of objects with { requestNumber: string, title: string, totalCost: number, supplier: string }`;
+
+    const userMessage = `Procurement Request Description: ${dto.description}
+${dto.estimatedBudget ? `Estimated Budget: $${dto.estimatedBudget}` : ''}
+${dto.departmentContext ? `Department: ${dto.departmentContext}` : ''}`;
+
+    return this.aiService.chatCompletionJson<IntakeAnalysisResponseDto>(
+      systemPrompt,
+      userMessage,
+      { temperature: 0.3 },
+    );
   }
 
   private mockAnalysis(dto: AnalyzeIntakeDto): IntakeAnalysisResponseDto {

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Target, TrendingDown, Briefcase, CalendarClock, Plus, X, Users, Calendar } from 'lucide-react';
-import { mockSourcingProjects } from '@/services/mockData';
+import { Target, TrendingDown, Briefcase, CalendarClock, Plus, X, Users, Calendar, Loader2, AlertCircle } from 'lucide-react';
+import { listSourcingProjects, createSourcingProject, type SourcingProject, type PaginatedResult } from '@/services/api';
+import { useApi } from '@/hooks/useApi';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { StatCard } from '@/components/ui/StatCard';
 
@@ -11,6 +12,11 @@ const typeColors: Record<string, string> = {
   RFQ: 'bg-blue-50 text-blue-700',
   RFI: 'bg-purple-50 text-purple-700',
   'Reverse Auction': 'bg-amber-50 text-amber-700',
+  // API returns lowercase types
+  rfp: 'bg-indigo-50 text-indigo-700',
+  rfq: 'bg-blue-50 text-blue-700',
+  rfi: 'bg-purple-50 text-purple-700',
+  reverse_auction: 'bg-amber-50 text-amber-700',
 };
 
 const vendorColors = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-purple-500', 'bg-cyan-500'];
@@ -19,8 +25,50 @@ export default function SourcingPage() {
   const [showModal, setShowModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newBudget, setNewBudget] = useState('');
+  const [creating, setCreating] = useState(false);
 
-  const activeCount = mockSourcingProjects.filter(p => ['Active', 'Evaluation'].includes(p.status)).length;
+  const { data, loading, error, refetch } = useApi<PaginatedResult<SourcingProject>>(() => listSourcingProjects(), []);
+  const projects = data?.items ?? [];
+
+  const activeCount = projects.filter(p => ['active', 'evaluation', 'bidding_open', 'published'].includes(p.status)).length;
+
+  const handleCreate = async () => {
+    if (!newTitle.trim()) return;
+    setCreating(true);
+    try {
+      await createSourcingProject({ title: newTitle, estimatedValue: parseFloat(newBudget) || 0, type: 'RFP' });
+      setShowModal(false);
+      setNewTitle('');
+      setNewBudget('');
+      refetch();
+    } catch {
+      alert('Failed to create sourcing event');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+        <span className="ml-3 text-sm text-slate-500">Loading sourcing projects...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <AlertCircle className="h-8 w-8 text-red-400 mx-auto mb-2" />
+          <p className="text-sm text-red-600">Failed to load sourcing projects</p>
+          <p className="text-xs text-slate-500 mt-1">{error}</p>
+          <button onClick={refetch} className="mt-3 text-sm text-indigo-600 hover:underline">Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -65,59 +113,62 @@ export default function SourcingPage() {
 
       {/* Project Cards */}
       <div className="space-y-4">
-        {mockSourcingProjects.map(project => (
-          <div key={project.id} className="rounded-2xl bg-white border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="space-y-2 flex-1 min-w-0">
-                <div className="flex items-center gap-3">
-                  <h3 className="text-sm font-semibold text-slate-900 truncate">{project.title}</h3>
-                  <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${typeColors[project.type] || 'bg-slate-100 text-slate-700'}`}>
-                    {project.type}
-                  </span>
-                  <StatusBadge status={project.status} />
-                </div>
-                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
-                  <span className="flex items-center gap-1">
-                    <Target className="h-3.5 w-3.5" />
-                    {project.owner}
-                  </span>
-                  <span className="font-mono font-medium text-slate-700">
-                    ${project.budget.toLocaleString()}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Calendar className="h-3.5 w-3.5" />
-                    Due {project.dueDate}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                {/* Vendor Avatars */}
-                <div className="flex items-center">
-                  {project.vendors.slice(0, 4).map((vendor, i) => (
-                    <div
-                      key={i}
-                      title={vendor}
-                      className={`flex h-8 w-8 -ml-2 first:ml-0 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white ${vendorColors[i % vendorColors.length]}`}
-                    >
-                      {vendor.split(' ').map(w => w[0]).join('').slice(0, 2)}
-                    </div>
-                  ))}
-                  {project.vendors.length > 4 && (
-                    <div className="flex h-8 w-8 -ml-2 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-bold text-slate-600">
-                      +{project.vendors.length - 4}
-                    </div>
-                  )}
-                  {project.vendors.length === 0 && (
-                    <span className="text-xs text-slate-400 flex items-center gap-1">
-                      <Users className="h-3.5 w-3.5" /> No vendors yet
+        {projects.map(project => {
+          const vendors = project.bids?.map(b => b.supplierName) || [];
+          return (
+            <div key={project.id} className="rounded-2xl bg-white border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="space-y-2 flex-1 min-w-0">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-sm font-semibold text-slate-900 truncate">{project.title}</h3>
+                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${typeColors[project.type] || 'bg-slate-100 text-slate-700'}`}>
+                      {project.type.toUpperCase()}
                     </span>
-                  )}
+                    <StatusBadge status={project.status} />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
+                    <span className="flex items-center gap-1">
+                      <Target className="h-3.5 w-3.5" />
+                      N/A
+                    </span>
+                    <span className="font-mono font-medium text-slate-700">
+                      ${(project.estimatedValue || 0).toLocaleString()}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Calendar className="h-3.5 w-3.5" />
+                      Due {project.bidEndDate || 'TBD'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {/* Vendor Avatars */}
+                  <div className="flex items-center">
+                    {vendors.slice(0, 4).map((vendor, i) => (
+                      <div
+                        key={i}
+                        title={vendor}
+                        className={`flex h-8 w-8 -ml-2 first:ml-0 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white ${vendorColors[i % vendorColors.length]}`}
+                      >
+                        {vendor.split(' ').map(w => w[0]).join('').slice(0, 2)}
+                      </div>
+                    ))}
+                    {vendors.length > 4 && (
+                      <div className="flex h-8 w-8 -ml-2 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-bold text-slate-600">
+                        +{vendors.length - 4}
+                      </div>
+                    )}
+                    {vendors.length === 0 && (
+                      <span className="text-xs text-slate-400 flex items-center gap-1">
+                        <Users className="h-3.5 w-3.5" /> No vendors yet
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Create Modal */}
@@ -155,10 +206,11 @@ export default function SourcingPage() {
                 </div>
               </div>
               <button
-                onClick={() => setShowModal(false)}
-                className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                onClick={handleCreate}
+                disabled={creating || !newTitle.trim()}
+                className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Create Event
+                {creating ? 'Creating...' : 'Create Event'}
               </button>
             </div>
           </div>

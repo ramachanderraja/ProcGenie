@@ -51,6 +51,14 @@ export class Workflow extends BaseEntity {
   @Column({ name: 'escalation_rules', type: 'jsonb', nullable: true })
   escalationRules?: Record<string, unknown>;
 
+  @ApiProperty({ description: 'Entity types this workflow applies to', example: ['REQUEST', 'CONTRACT'] })
+  @Column({ name: 'entity_types', type: 'text', array: true, nullable: true })
+  entityTypes?: string[];
+
+  @ApiProperty({ description: 'React Flow graph JSON with nodes and edges' })
+  @Column({ type: 'jsonb', nullable: true })
+  graph?: Record<string, unknown>;
+
   @ApiProperty({ type: () => [WorkflowStep] })
   @OneToMany(() => WorkflowStep, (step) => step.workflow, { cascade: true, eager: true })
   steps: WorkflowStep[];

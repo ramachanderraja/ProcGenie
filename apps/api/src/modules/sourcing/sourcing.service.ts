@@ -79,7 +79,6 @@ export class SourcingService {
 
     const queryBuilder = this.projectRepository
       .createQueryBuilder('project')
-      .leftJoinAndSelect('project.evaluationCriteria', 'criteria')
       .where('project.tenant_id = :tenantId', { tenantId });
 
     if (options?.status) {

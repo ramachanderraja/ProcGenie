@@ -39,7 +39,12 @@ COPY apps/web ./apps/web
 # Set Next.js telemetry off during build
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Accept API URL as build arg so NEXT_PUBLIC_ var is inlined at build time
+ARG NEXT_PUBLIC_API_URL=http://localhost:4000/api/v1
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 # Build the Next.js application with standalone output
+# outputFileTracingRoot in next.config.ts is set to ../../ (monorepo root)
 WORKDIR /app/apps/web
 RUN npm run build
 
@@ -71,13 +76,14 @@ RUN apk update && apk upgrade --no-cache && \
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy public assets
-COPY --from=builder /app/apps/web/public ./public
+# Copy public assets (to the monorepo-relative path)
+COPY --from=builder /app/apps/web/public ./apps/web/public
 
 # Create .next directory and set ownership
-RUN mkdir .next && chown nextjs:nodejs .next
+RUN mkdir -p apps/web/.next && chown nextjs:nodejs apps/web/.next
 
-# Copy standalone build output
+# Copy standalone build output (with outputFileTracingRoot=../../, standalone
+# mirrors the monorepo layout: node_modules/ at root, apps/web/server.js, etc.)
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 
@@ -91,5 +97,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3000/api/health || exit 1
 
-# Start the application
+# Start the application (server.js is at apps/web/server.js in monorepo layout)
 CMD ["node", "apps/web/server.js"]

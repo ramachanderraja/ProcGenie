@@ -1,9 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Building2, Shield, Star, CheckCircle2, XCircle, AlertTriangle, Mail, Phone, Globe, FileText, ExternalLink } from 'lucide-react';
-import { mockVendors, mockContracts } from '@/services/mockData';
+import { ArrowLeft, Building2, Shield, Star, CheckCircle2, XCircle, AlertTriangle, Mail, Globe, FileText, ExternalLink, AlertCircle, Loader2 } from 'lucide-react';
+import { getSupplier, listContracts, performRiskScan, type Supplier, type Contract, type PaginatedResult, type SupplierRiskProfile } from '@/services/api';
+import { useApi } from '@/hooks/useApi';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 
 function getTrustColor(score: number) {
@@ -13,26 +15,112 @@ function getTrustColor(score: number) {
   return 'text-red-600';
 }
 
-function complianceIcon(status: string) {
-  if (status.toLowerCase().includes('valid') || status.toLowerCase().includes('verified') || status.toLowerCase().includes('clear')) {
-    return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
-  }
-  if (status.toLowerCase().includes('pending') || status.toLowerCase().includes('warning')) {
-    return <AlertTriangle className="h-4 w-4 text-amber-500" />;
-  }
-  return <XCircle className="h-4 w-4 text-red-500" />;
+/** Convert API status (e.g. ACTIVE, ONBOARDING) to display form */
+function formatStatus(status: string): string {
+  return status
+    .split('_')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
 }
 
-function sentimentColor(sentiment: string) {
-  if (sentiment === 'Positive') return 'text-emerald-600 bg-emerald-50';
-  if (sentiment === 'Neutral') return 'text-amber-600 bg-amber-50';
-  return 'text-red-600 bg-red-50';
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function riskLevelColor(score: number): string {
+  if (score <= 30) return 'bg-emerald-500';
+  if (score <= 60) return 'bg-amber-500';
+  return 'bg-red-500';
+}
+
+function riskLevelLabel(score: number): string {
+  if (score <= 30) return 'Low';
+  if (score <= 60) return 'Medium';
+  return 'High';
 }
 
 export default function VendorDetailPage() {
   const params = useParams()!;
   const id = params.id as string;
-  const vendor = mockVendors.find(v => v.id === id);
+  const { data: vendor, loading, error } = useApi<Supplier>(() => getSupplier(id), [id]);
+  const { data: contractsData } = useApi<PaginatedResult<Contract>>(() => listContracts({ supplierId: id }), [id]);
+  const [riskScanResult, setRiskScanResult] = useState<SupplierRiskProfile | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+
+  const vendorContracts = contractsData?.items ?? [];
+
+  const handleRiskScan = async () => {
+    setScanning(true);
+    setScanError(null);
+    try {
+      const result = await performRiskScan(id);
+      setRiskScanResult(result);
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : 'Failed to run risk scan');
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // Loading skeleton
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div className="h-5 w-28 rounded bg-slate-200 animate-pulse" />
+        <div className="rounded-2xl bg-white border border-slate-100 p-6 shadow-sm animate-pulse">
+          <div className="flex items-start gap-5">
+            <div className="h-16 w-16 rounded-2xl bg-slate-200" />
+            <div className="flex-1 space-y-3">
+              <div className="h-6 w-48 rounded bg-slate-200" />
+              <div className="h-4 w-32 rounded bg-slate-100" />
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2 space-y-6">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6 animate-pulse">
+                <div className="h-5 w-32 rounded bg-slate-200 mb-4" />
+                <div className="space-y-2">
+                  <div className="h-4 w-full rounded bg-slate-100" />
+                  <div className="h-4 w-3/4 rounded bg-slate-100" />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6 animate-pulse">
+              <div className="h-5 w-36 rounded bg-slate-200 mb-4" />
+              <div className="h-16 w-16 mx-auto rounded bg-slate-200 mb-4" />
+              <div className="space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-3 rounded bg-slate-100" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <Link href="/vendors" className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors">
+          <ArrowLeft className="h-4 w-4" /> Back to Vendors
+        </Link>
+        <div className="flex flex-col items-center justify-center py-24">
+          <AlertCircle className="h-12 w-12 text-red-400" />
+          <h2 className="mt-4 text-lg font-semibold text-slate-700">Failed to load vendor</h2>
+          <p className="mt-1 text-sm text-slate-500">{error}</p>
+          <Link href="/vendors" className="mt-4 text-sm font-medium text-indigo-600 hover:text-indigo-700">Back to Vendors</Link>
+        </div>
+      </div>
+    );
+  }
 
   if (!vendor) {
     return (
@@ -44,7 +132,11 @@ export default function VendorDetailPage() {
     );
   }
 
-  const vendorContracts = mockContracts.filter(c => c.vendorName === vendor.name);
+  const rating = vendor.overallScore || 0;
+  const trustScore = Math.round(rating * 20); // Convert 0-5 to 0-100
+  const isPreferred = vendor.tier === 'STRATEGIC';
+  const category = vendor.categories?.[0] || vendor.industry || 'General';
+  const riskProfile = riskScanResult || vendor.riskProfile;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -57,25 +149,20 @@ export default function VendorDetailPage() {
       <div className="rounded-2xl bg-white border border-slate-100 p-6 shadow-sm">
         <div className="flex flex-wrap items-start gap-5">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-100 text-xl font-bold text-indigo-700">
-            {vendor.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+            {vendor.companyName.split(' ').map(w => w[0]).join('').slice(0, 2)}
           </div>
           <div className="flex-1 min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-bold text-slate-900">{vendor.name}</h1>
-              {vendor.isPreferred && (
+              <h1 className="text-xl font-bold text-slate-900">{vendor.companyName}</h1>
+              {isPreferred && (
                 <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Preferred</span>
               )}
-              {vendor.complianceStatus.taxValid.includes('Valid') && (
-                <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">Tax Verified</span>
-              )}
-              {vendor.documents.some(d => d.type === 'SOC2') && (
-                <span className="inline-flex rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-semibold text-purple-700">SOC2</span>
-              )}
+              <StatusBadge status={formatStatus(vendor.status)} />
             </div>
             <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
-              <span>{vendor.category}</span>
+              <span>{category}</span>
               <span className="text-slate-300">|</span>
-              <span className="font-mono font-medium text-slate-700">${(vendor.spendLast12M / 1000).toFixed(0)}K annual spend</span>
+              <span className="font-mono text-slate-400">{vendor.supplierCode}</span>
             </div>
           </div>
         </div>
@@ -88,96 +175,126 @@ export default function VendorDetailPage() {
           {/* About */}
           <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6 space-y-5">
             <h2 className="text-sm font-semibold text-slate-900">About</h2>
-            <p className="text-sm leading-relaxed text-slate-600">{vendor.description}</p>
+            <p className="text-sm leading-relaxed text-slate-600">{vendor.description || 'No description available.'}</p>
             <div className="rounded-xl bg-slate-50 border border-slate-100 p-4">
               <h3 className="text-xs font-semibold text-slate-500 uppercase mb-3">Contact</h3>
               <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-slate-700">
-                  <Mail className="h-4 w-4 text-slate-400" />
-                  <span>{vendor.contactName} - {vendor.contactEmail}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-slate-700">
-                  <Globe className="h-4 w-4 text-slate-400" />
-                  <a href={vendor.website} className="text-indigo-600 hover:text-indigo-700">{vendor.website}</a>
-                </div>
+                {vendor.contactName && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Mail className="h-4 w-4 text-slate-400" />
+                    <span>{vendor.contactName}{vendor.contactEmail ? ` - ${vendor.contactEmail}` : ''}</span>
+                  </div>
+                )}
+                {vendor.website && (
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Globe className="h-4 w-4 text-slate-400" />
+                    <a href={vendor.website} className="text-indigo-600 hover:text-indigo-700">{vendor.website}</a>
+                  </div>
+                )}
+                {!vendor.contactName && !vendor.website && (
+                  <p className="text-sm text-slate-400">No contact information available.</p>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Compliance Console */}
+          {/* Risk Profile / AI Risk Scan */}
           <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6">
-            <h2 className="text-sm font-semibold text-slate-900 mb-4">Compliance Console</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                { label: 'Bank Verification', value: vendor.complianceStatus.bankValid },
-                { label: 'Tax ID', value: vendor.complianceStatus.taxValid },
-                { label: 'Sanctions Check', value: vendor.complianceStatus.sanctionsCheck },
-              ].map(item => (
-                <div key={item.label} className="rounded-xl border border-slate-100 p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    {complianceIcon(item.value)}
-                    <span className="text-xs font-semibold text-slate-700">{item.label}</span>
-                  </div>
-                  <p className="text-xs text-slate-500 pl-6">{item.value}</p>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-slate-900">AI Risk Scan</h2>
+              <button
+                onClick={handleRiskScan}
+                disabled={scanning}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50"
+              >
+                {scanning && <Loader2 className="h-3 w-3 animate-spin" />}
+                {scanning ? 'Scanning...' : 'Run Scan'}
+              </button>
+            </div>
+
+            {scanError && (
+              <div className="mb-3 flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+                <AlertCircle className="h-3.5 w-3.5 text-red-500" />
+                <p className="text-xs text-red-700">{scanError}</p>
+              </div>
+            )}
+
+            {riskProfile ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs font-medium text-slate-500">Overall Risk:</span>
+                  <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    riskProfile.overallRiskScore <= 30 ? 'bg-emerald-50 text-emerald-700' :
+                    riskProfile.overallRiskScore <= 60 ? 'bg-amber-50 text-amber-700' :
+                    'bg-red-50 text-red-700'
+                  }`}>
+                    {riskLevelLabel(riskProfile.overallRiskScore)} ({riskProfile.overallRiskScore})
+                  </span>
+                  <span className="text-xs text-slate-400 ml-auto">
+                    Last assessed: {formatDate(riskProfile.lastAssessmentDate)}
+                  </span>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* AI Risk Scan */}
-          <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6">
-            <h2 className="text-sm font-semibold text-slate-900 mb-4">AI Risk Scan</h2>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs font-medium text-slate-500">Sentiment:</span>
-              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${sentimentColor(vendor.riskScan.sentiment)}`}>
-                {vendor.riskScan.sentiment}
-              </span>
-              <span className="text-xs text-slate-400 ml-auto">
-                Last scanned: {new Date(vendor.riskScan.lastScanned).toLocaleDateString()}
-              </span>
-            </div>
-            <ul className="space-y-1.5">
-              {vendor.riskScan.findings.map((finding, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
-                  <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-slate-400 flex-shrink-0" />
-                  {finding}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Document Center */}
-          <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-6">
-            <h2 className="text-sm font-semibold text-slate-900 mb-4">Document Center</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="pb-2 text-left text-xs font-semibold text-slate-500">Document</th>
-                    <th className="pb-2 text-left text-xs font-semibold text-slate-500">Type</th>
-                    <th className="pb-2 text-left text-xs font-semibold text-slate-500">Status</th>
-                    <th className="pb-2 text-left text-xs font-semibold text-slate-500">Expiry</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {vendor.documents.map(doc => (
-                    <tr key={doc.id}>
-                      <td className="py-2.5 flex items-center gap-2 text-sm text-slate-700">
-                        <FileText className="h-4 w-4 text-slate-400" />
-                        {doc.name}
-                      </td>
-                      <td className="py-2.5 text-xs text-slate-500">{doc.type}</td>
-                      <td className="py-2.5">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${doc.status === 'Valid' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                          {doc.status}
-                        </span>
-                      </td>
-                      <td className="py-2.5 text-xs text-slate-500">{doc.expiryDate || '--'}</td>
-                    </tr>
+                {/* Risk Factor Bars */}
+                <div className="space-y-3">
+                  {[
+                    { label: 'Financial Risk', value: riskProfile.financialRisk },
+                    { label: 'Operational Risk', value: riskProfile.operationalRisk },
+                    { label: 'Compliance Risk', value: riskProfile.complianceRisk },
+                    { label: 'Reputational Risk', value: riskProfile.reputationalRisk },
+                    { label: 'Geopolitical Risk', value: riskProfile.geopoliticalRisk },
+                  ].map(factor => (
+                    <div key={factor.label}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-slate-600">{factor.label}</span>
+                        <span className="text-xs font-semibold text-slate-900">{factor.value}/100</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-100">
+                        <div
+                          className={`h-2 rounded-full ${riskLevelColor(factor.value)}`}
+                          style={{ width: `${factor.value}%` }}
+                        />
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
+
+                {/* Risk Factors */}
+                {riskProfile.riskFactors && riskProfile.riskFactors.length > 0 && (
+                  <div className="pt-3">
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase mb-2">Risk Factors</h4>
+                    <ul className="space-y-1.5">
+                      {riskProfile.riskFactors.map((factor, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-slate-400 flex-shrink-0" />
+                          {factor}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Mitigation Actions */}
+                {riskProfile.mitigationActions && riskProfile.mitigationActions.length > 0 && (
+                  <div className="pt-3">
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase mb-2">Mitigation Actions</h4>
+                    <ul className="space-y-1.5">
+                      {riskProfile.mitigationActions.map((action, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
+                          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                          {action}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-6">
+                <Shield className="mx-auto h-8 w-8 text-slate-300" />
+                <p className="mt-2 text-sm text-slate-500">No risk scan data available. Run a scan to assess this vendor.</p>
+              </div>
+            )}
           </div>
 
           {/* Associated Contracts */}
@@ -193,10 +310,10 @@ export default function VendorDetailPage() {
                   >
                     <div>
                       <p className="text-sm font-medium text-slate-900">{c.title}</p>
-                      <p className="text-xs text-slate-500">{c.type} - ${c.value.toLocaleString()}</p>
+                      <p className="text-xs text-slate-500">{c.type} - ${(c.totalValue || 0).toLocaleString()}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <StatusBadge status={c.status} />
+                      <StatusBadge status={formatStatus(c.status)} />
                       <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
                     </div>
                   </Link>
@@ -213,30 +330,30 @@ export default function VendorDetailPage() {
 
             {/* Trust Score */}
             <div className="text-center mb-6">
-              <div className={`text-5xl font-bold ${getTrustColor(vendor.trustScore)}`}>
-                {vendor.trustScore}
+              <div className={`text-5xl font-bold ${getTrustColor(trustScore)}`}>
+                {trustScore}
               </div>
               <p className="mt-1 text-xs text-slate-500">Trust Score</p>
               <div className="flex items-center justify-center gap-0.5 mt-2">
                 {Array.from({ length: 5 }, (_, i) => (
                   <Star
                     key={i}
-                    className={`h-4 w-4 ${i < Math.floor(vendor.performanceRating) ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`}
+                    className={`h-4 w-4 ${i < Math.floor(rating) ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`}
                   />
                 ))}
-                <span className="ml-1.5 text-sm text-slate-500">{vendor.performanceRating}</span>
+                <span className="ml-1.5 text-sm text-slate-500">{rating.toFixed(1)}</span>
               </div>
             </div>
 
-            {/* Trust Factor Bars */}
+            {/* ESG Trust Factors */}
             <div className="space-y-4">
               <h4 className="text-xs font-semibold text-slate-500 uppercase">Trust Factors</h4>
-              {vendor.esgScore && (
+              {vendor.esgScore ? (
                 <>
                   {[
-                    { label: 'Environmental', value: vendor.esgScore.environmental },
-                    { label: 'Social', value: vendor.esgScore.social },
-                    { label: 'Governance', value: vendor.esgScore.governance },
+                    { label: 'Environmental', value: vendor.esgScore.environmentalScore },
+                    { label: 'Social', value: vendor.esgScore.socialScore },
+                    { label: 'Governance', value: vendor.esgScore.governanceScore },
                   ].map(factor => (
                     <div key={factor.label}>
                       <div className="flex items-center justify-between mb-1">
@@ -252,6 +369,8 @@ export default function VendorDetailPage() {
                     </div>
                   ))}
                 </>
+              ) : (
+                <p className="text-xs text-slate-400">ESG data not available.</p>
               )}
             </div>
 
@@ -260,18 +379,18 @@ export default function VendorDetailPage() {
               <div className="mt-5 pt-5 border-t border-slate-100">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-slate-700">ESG Overall</span>
-                  <span className={`text-lg font-bold ${getTrustColor(vendor.esgScore.overall)}`}>
-                    {vendor.esgScore.overall}
+                  <span className={`text-lg font-bold ${getTrustColor(vendor.esgScore.overallScore)}`}>
+                    {vendor.esgScore.overallScore}
                   </span>
                 </div>
               </div>
             )}
 
-            {/* Diversity */}
-            {vendor.diversityClassification && vendor.diversityClassification !== 'None' && (
+            {/* Tier */}
+            {vendor.tier && (
               <div className="mt-4 pt-4 border-t border-slate-100">
                 <span className="inline-flex rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-semibold text-purple-700">
-                  {vendor.diversityClassification}
+                  {formatStatus(vendor.tier)}
                 </span>
               </div>
             )}

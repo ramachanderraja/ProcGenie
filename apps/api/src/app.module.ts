@@ -4,11 +4,14 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CacheModule } from '@nestjs/cache-manager';
 import { BullModule } from '@nestjs/bull';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { APP_GUARD } from '@nestjs/core';
-import * as redisStore from 'cache-manager-redis-store';
+import { redisStore } from 'cache-manager-redis-yet';
 
 import configuration from './config/configuration';
 import { typeOrmAsyncConfig } from './config/database.config';
+import { AiModule } from './common/services/ai.module';
+import { HealthController } from './health.controller';
 
 // Feature Modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -24,6 +27,7 @@ import { SustainabilityModule } from './modules/sustainability/sustainability.mo
 import { IntegrationModule } from './modules/integrations/integration.module';
 import { AgentModule } from './modules/agents/agent.module';
 import { NotificationModule } from './modules/notifications/notification.module';
+import { ChatModule } from './modules/chat/chat.module';
 
 @Module({
   imports: [
@@ -42,13 +46,17 @@ import { NotificationModule } from './modules/notifications/notification.module'
       isGlobal: true,
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        store: redisStore,
-        host: configService.get<string>('redis.host'),
-        port: configService.get<number>('redis.port'),
-        password: configService.get<string>('redis.password'),
-        db: configService.get<number>('redis.db'),
-        ttl: configService.get<number>('redis.ttl'),
+      useFactory: async (configService: ConfigService) => ({
+        store: await redisStore({
+          socket: {
+            host: configService.get<string>('redis.host'),
+            port: configService.get<number>('redis.port'),
+            tls: configService.get<number>('redis.port') === 6380,
+          },
+          password: configService.get<string>('redis.password'),
+          database: configService.get<number>('redis.db'),
+          ttl: configService.get<number>('redis.ttl'),
+        }),
       }),
     }),
 
@@ -62,6 +70,7 @@ import { NotificationModule } from './modules/notifications/notification.module'
           port: configService.get<number>('redis.port'),
           password: configService.get<string>('redis.password'),
           db: configService.get<number>('redis.db'),
+          tls: configService.get<number>('redis.port') === 6380 ? {} : undefined,
         },
         prefix: configService.get<string>('bull.prefix'),
         defaultJobOptions: {
@@ -95,6 +104,12 @@ import { NotificationModule } from './modules/notifications/notification.module'
       },
     ]),
 
+    // ── Event Emitter (Global) ────────────────────────────────────────
+    EventEmitterModule.forRoot(),
+
+    // ── AI Service (Global) ───────────────────────────────────────────
+    AiModule,
+
     // ── Feature Modules ──────────────────────────────────────────────
     AuthModule,
     IntakeModule,
@@ -109,7 +124,9 @@ import { NotificationModule } from './modules/notifications/notification.module'
     IntegrationModule,
     AgentModule,
     NotificationModule,
+    ChatModule,
   ],
+  controllers: [HealthController],
   providers: [
     // ── Global Throttle Guard ────────────────────────────────────────
     {

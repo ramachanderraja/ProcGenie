@@ -7,6 +7,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AiService } from '../../common/services/ai.service';
 import { Contract, ContractStatus } from './entities/contract.entity';
 import { Clause } from './entities/clause.entity';
 import { Amendment, AmendmentStatus } from './entities/amendment.entity';
@@ -33,6 +35,8 @@ export class ContractService {
     @InjectRepository(Obligation)
     private readonly obligationRepository: Repository<Obligation>,
     private readonly configService: ConfigService,
+    private readonly aiService: AiService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(
@@ -81,8 +85,6 @@ export class ContractService {
 
     const queryBuilder = this.contractRepository
       .createQueryBuilder('contract')
-      .leftJoinAndSelect('contract.clauses', 'clauses')
-      .leftJoinAndSelect('contract.obligations', 'obligations')
       .where('contract.tenant_id = :tenantId', { tenantId });
 
     if (options?.status) {
@@ -163,6 +165,15 @@ export class ContractService {
     contract.status = ContractStatus.IN_REVIEW;
     const saved = await this.contractRepository.save(contract);
     this.logger.log(`Contract submitted for review: ${saved.contractNumber}`);
+
+    // Emit event for workflow engine
+    this.eventEmitter.emit('contract.submitted', {
+      entityType: 'CONTRACT',
+      entityId: id,
+      entity: saved,
+      tenantId,
+    });
+
     return saved;
   }
 
@@ -290,8 +301,25 @@ export class ContractService {
   private async performAiAnalysis(
     dto: AnalyzeContractDto,
   ): Promise<ContractAnalysisResponseDto> {
-    // Placeholder for actual Azure OpenAI SDK call
-    return this.mockAnalysis(dto);
+    const systemPrompt = `You are an expert legal and procurement contract analyst for ProcGenie, a Fortune 500 Source-to-Pay platform.
+Analyze the following contract text and provide a thorough risk assessment.
+
+Respond with a JSON object containing exactly these fields:
+- riskScore: number (0-100, where 0 is no risk and 100 is extremely risky)
+- keyTerms: array of { term: string, value: string, section: string }
+- riskyClauses: array of { clause: string, risk: "low" | "medium" | "high" | "critical", recommendation: string }
+- missingClauses: string[] (important clauses that are missing from the contract)
+- recommendations: string[] (4-6 actionable recommendations)
+- obligations: array of { party: string, obligation: string, frequency: string }
+- summary: string (2-3 sentence executive summary of the analysis)`;
+
+    const userMessage = `Contract Text:\n${dto.contractText}${dto.focusAreas?.length ? `\n\nFocus Areas: ${dto.focusAreas.join(', ')}` : ''}`;
+
+    return this.aiService.chatCompletionJson<ContractAnalysisResponseDto>(
+      systemPrompt,
+      userMessage,
+      { maxTokens: 4096, temperature: 0.2 },
+    );
   }
 
   private mockAnalysis(dto: AnalyzeContractDto): ContractAnalysisResponseDto {

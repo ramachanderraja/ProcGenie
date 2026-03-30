@@ -128,7 +128,7 @@ resource webApp 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'web'
-          image: '${acrLoginServer}/procgenie-web:latest'
+          image: '${acrLoginServer}/procgenie-web:v1.0.1'
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
@@ -251,7 +251,7 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'api'
-          image: '${acrLoginServer}/procgenie-api:latest'
+          image: '${acrLoginServer}/procgenie-api:v1.0.1'
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
@@ -311,8 +311,7 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
           probes: [
             {
               type: 'Liveness'
-              httpGet: {
-                path: '/api/v1/health'
+              tcpSocket: {
                 port: 4000
               }
               initialDelaySeconds: 30
@@ -321,8 +320,7 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               type: 'Readiness'
-              httpGet: {
-                path: '/api/v1/health'
+              tcpSocket: {
                 port: 4000
               }
               initialDelaySeconds: 15
@@ -331,8 +329,7 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               type: 'Startup'
-              httpGet: {
-                path: '/api/v1/health'
+              tcpSocket: {
                 port: 4000
               }
               initialDelaySeconds: 10

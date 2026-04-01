@@ -110,7 +110,7 @@ jobs:
             ${{ env.ACR_LOGIN_SERVER }}/procgenie-web:latest
           build-args: |
             NEXT_PUBLIC_API_URL=https://${{ env.API_FQDN }}/api/v1
-          no-cache: true
+          cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
       - name: Build and push API image

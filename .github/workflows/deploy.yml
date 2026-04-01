@@ -108,6 +108,8 @@ jobs:
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/procgenie-web:${{ env.IMAGE_TAG }}
             ${{ env.ACR_LOGIN_SERVER }}/procgenie-web:latest
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://${{ env.API_FQDN }}/api/v1
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
